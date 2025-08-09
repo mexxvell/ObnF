@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h1>??? ???????</h1>
+    <div style="display:flex; align-items:center; gap:20px; margin:20px 0;">
+        <div style="width:80px; height:80px; border-radius:50%; background-color:#0a2240; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">
+            ??
+        </div>
+        <div>
+            <h2>???? ??????</h2>
+            <p>???????: ??????</p>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>??????????</h2>
+    <div style="display:grid; grid-template-columns:repeat(3, 1fr); text-align:center; gap:10px; margin-top:15px;">
+        <div>
+            <div style="font-size:1.5rem; font-weight:bold;">5</div>
+            <div>??????</div>
+        </div>
+        <div>
+            <div style="font-size:1.5rem; font-weight:bold;">3</div>
+            <div>????</div>
+        </div>
+        <div>
+            <div style="font-size:1.5rem; font-weight:bold;">2</div>
+            <div>???????</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>?????? ????? ???????</h2>
+    <ul class="player-list">
+        {% for player in players['??????'] %}
+        <li>{{ player }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}
