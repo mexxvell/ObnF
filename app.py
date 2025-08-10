@@ -288,6 +288,18 @@ def miniapp_profile_api():
         "badges": (row.badges or "").split(",") if row.badges else [],
         "coins": row.coins
     })
+    
+    @app.route('/miniapp/standings')
+def miniapp_standings():
+    if not gs_client:
+        return "Google Sheets не настроен", 500
+    try:
+        ws = sheet.worksheet("ТАБЛИЦА")
+        data = ws.get_all_values()
+    except Exception as e:
+        logger.error(f"Ошибка чтения Google Sheets: {e}")
+        return "Ошибка чтения данных", 500
+    return render_template('standings.html', table=data)
 
 @app.route('/miniapp/create_order', methods=['POST'])
 def miniapp_create_order():

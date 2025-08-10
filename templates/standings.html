@@ -1,0 +1,15 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page page-standings">
+  <h2>Турнирная таблица</h2>
+  <table class="standings-table">
+    {% for row in table %}
+      <tr>
+        {% for cell in row %}
+          <td>{{ cell }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

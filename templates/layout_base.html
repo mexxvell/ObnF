@@ -10,9 +10,33 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+  
+  <!-- Бургер-меню -->
+  <nav class="burger-menu">
+    <ul>
+      <li><a href="/miniapp/home">🏠 Главная</a></li>
+      <li><a href="/miniapp/standings">📊 Турнирная таблица</a></li>
+      <li><a href="/miniapp/nlo88">🛸 НЛО 8х8</a></li>
+      <li><a href="/miniapp/predictions">📈 Прогнозы</a></li>
+      <li><a href="/miniapp/profile">👤 Профиль</a></li>
+      <li><a href="/miniapp/support">📢 Поддержка</a></li>
+      {% if session.get('user_id') == OWNER_ID %}
+      <li><a href="/miniapp/admin">⚙️ Админ</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+
   <div id="app">
     {% block content %}{% endblock %}
   </div>
+
+  <!-- Нижнее меню -->
+  <footer class="bottom-nav">
+    <a href="/miniapp/home">🏠</a>
+    <a href="/miniapp/standings">📊</a>
+    <a href="/miniapp/predictions">📈</a>
+    <a href="/miniapp/profile">👤</a>
+  </footer>
 
   <script>
     // expose OWNER_ID to front-end
