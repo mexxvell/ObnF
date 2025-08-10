@@ -34,7 +34,7 @@ OWNER_ID = int(os.getenv("OWNER_TELEGRAM_ID", "0")) or None
 if not OWNER_ID:
     raise RuntimeError("OWNER_TELEGRAM_ID required")
 
-RENDER_URL = os.getenv("RENDER_URL", "https://your-app.onrender.com")
+RENDER_URL = os.getenv("RENDER_URL", "https://football-league-app.onrender.com").rstrip('/')
 WEBHOOK_URL = f"{RENDER_URL}/{TOKEN}"
 MINIAPP_URL = f"{RENDER_URL}/miniapp"
 
@@ -239,6 +239,10 @@ def current_online_counts():
 def miniapp():
     # base page with WebApp JS that will set session via initData
     return render_template('miniapp_index.html', miniapp_url=MINIAPP_URL, owner_id=OWNER_ID)
+    
+@app.route('/')
+def index():
+    return redirect(url_for('miniapp'))
 
 @app.route('/miniapp/init', methods=['POST'])
 def miniapp_init():
