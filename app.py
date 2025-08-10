@@ -644,15 +644,14 @@ if gs_client:
 
 # --- Test data generator (if no matches) ---
 def generate_test_matches():
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         cnt = conn.execute(sql_text("SELECT COUNT(*) FROM matches")).scalar()
         if cnt == 0:
             teams = [("Динамо","Спартак"),("Торпедо","Зенит"),("Локомотив","Челси"),("Динамо","Зенит")]
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)  # Исправлено!
             for i, pair in enumerate(teams, start=1):
                 conn.execute(sql_text("INSERT INTO matches (round, team1, team2, datetime, stream_url) VALUES (:r,:a,:b,:dt,:url)"),
                              {"r": i, "a": pair[0], "b": pair[1], "dt": now + timedelta(days=i), "url": "https://www.youtube.com/embed/dQw4w9WgXcQ"})
-            conn.commit()
             logger.info("Inserted test matches")
 
 generate_test_matches()
