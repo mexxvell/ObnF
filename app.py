@@ -1,631 +1,600 @@
+# app.py
 import os
 import logging
 import threading
 import time
-import requests
 import json
-from flask import Flask, request, render_template, jsonify, session
+from datetime import datetime, timedelta
+from functools import wraps
+
+from flask import Flask, request, render_template, jsonify, session, redirect, url_for
 import telebot
 from telebot import types
-from datetime import datetime, date, timedelta
-import sqlalchemy
-from sqlalchemy import create_engine
-from sqlalchemy import text as sql_text
+from sqlalchemy import create_engine, text as sql_text
 import random
 
-# --- Настройка логирования ---
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Optional: gspread for Google Sheets integration
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    GS_ENABLED = True
+except Exception:
+    GS_ENABLED = False
+
+# --- Logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Константы (из Environment Variables) ---
+# --- Environment / Config ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    logger.error("Переменная TELEGRAM_BOT_TOKEN не установлена")
-    raise RuntimeError("TOKEN is required")
-    
+    raise RuntimeError("TELEGRAM_BOT_TOKEN required")
+
 OWNER_ID = int(os.getenv("OWNER_TELEGRAM_ID", "0")) or None
 if not OWNER_ID:
-    logger.error("Переменная OWNER_TELEGRAM_ID не установлена или некорректна")
-    raise RuntimeError("OWNER_TELEGRAM_ID is required")
-    
+    raise RuntimeError("OWNER_TELEGRAM_ID required")
+
 RENDER_URL = os.getenv("RENDER_URL", "https://your-app.onrender.com")
 WEBHOOK_URL = f"{RENDER_URL}/{TOKEN}"
 MINIAPP_URL = f"{RENDER_URL}/miniapp"
 
-# --- Настройка PostgreSQL ---
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-    if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    try:
-        engine = create_engine(DATABASE_URL)
-        with engine.connect() as conn:
-            conn.execute(sql_text("SELECT 1"))
-        logger.info("Успешное подключение к PostgreSQL")
-    except Exception as e:
-        logger.error(f"Ошибка подключения к PostgreSQL: {e}")
-        raise
-else:
-    logger.warning("Переменная DATABASE_URL не установлена. Бот может не работать корректно.")
+DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres URL
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# --- Инициализация БД ---
+# Google Sheets
+GS_CREDS_JSON = os.getenv("GS_CREDS_JSON")  # JSON string of service account creds
+GS_SHEET_ID = os.getenv("GS_SHEET_ID")      # spreadsheet id
+
+# Promo codes mapping by milestone level
+PROMOCODES_BY_LEVEL = {
+    10: "PROMO10",
+    25: "PROMO25",
+    50: "PROMO50",
+    100: "PROMO100"
+}
+
+# --- DB init ---
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is required (Postgres).")
+
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+
 def init_db():
-    try:
-        with engine.connect() as conn:
-            # Таблица матчей
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS matches (
-                    id SERIAL PRIMARY KEY,
-                    round INTEGER,
-                    team1 TEXT,
-                    team2 TEXT,
-                    score1 INTEGER DEFAULT 0,
-                    score2 INTEGER DEFAULT 0,
-                    datetime TIMESTAMP,
-                    status TEXT DEFAULT 'scheduled',
-                    stream_url TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            '''))
-            
-            # Таблица игр команд
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS team_form (
-                    id SERIAL PRIMARY KEY,
-                    team TEXT,
-                    form TEXT
-                )
-            '''))
-            
-            # Таблица составы команд
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS team_players (
-                    id SERIAL PRIMARY KEY,
-                    team TEXT,
-                    player TEXT,
-                    position TEXT,
-                    number INTEGER
-                )
-            '''))
-            
-            # Таблица уведомлений
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS notifications (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    match_id INTEGER,
-                    event TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    seen BOOLEAN DEFAULT FALSE
-                )
-            '''))
-            
-            # Таблица подписок на матчи
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS match_subscriptions (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    match_id INTEGER,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            '''))
-            
-            # Таблица активных сессий
-            conn.execute(sql_text('''
-                CREATE TABLE IF NOT EXISTS active_sessions (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    page TEXT,
-                    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            '''))
-            
-            conn.commit()
-    except Exception as e:
-        logger.error(f"Ошибка инициализации базы данных: {e}")
-        raise
+    with engine.connect() as conn:
+        # users table
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGINT PRIMARY KEY,
+                username TEXT,
+                display_name TEXT,
+                level INTEGER DEFAULT 1,
+                xp INTEGER DEFAULT 0,
+                coins INTEGER DEFAULT 0,
+                badges TEXT DEFAULT '',
+                referrer BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                banned_until TIMESTAMP
+            )
+        '''))
+        # matches
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS matches (
+                id SERIAL PRIMARY KEY,
+                round INTEGER,
+                team1 TEXT,
+                team2 TEXT,
+                score1 INTEGER DEFAULT 0,
+                score2 INTEGER DEFAULT 0,
+                datetime TIMESTAMP,
+                status TEXT DEFAULT 'scheduled', -- scheduled/live/finished
+                stream_url TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # subscriptions
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS match_subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                match_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # comments (просто пример)
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS comments (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                match_id INTEGER,
+                text TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # notifications (server-side for in-app banners)
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS notifications (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                match_id INTEGER,
+                event TEXT,
+                seen BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # shop orders
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS orders (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                item TEXT,
+                price INTEGER,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # active sessions for in-app presence
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS active_sessions (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT UNIQUE,
+                page TEXT,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+    logger.info("DB initialized")
 
 init_db()
 
-# --- Генерация тестовых данных ---
-def generate_test_data():
+# --- gspread (Google Sheets) setup ---
+gs_client = None
+if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
     try:
-        with engine.connect() as conn:
-            # Проверяем, есть ли уже данные
-            result = conn.execute(sql_text("SELECT COUNT(*) FROM matches"))
-            count = result.fetchone()[0]
-            
-            if count == 0:
-                # Добавляем матчи
-                matches = [
-                    (1, "Динамо", "Спартак", 0, 0, datetime.now() + timedelta(hours=2), "scheduled", "https://vk.com/video?embed=12345"),
-                    (1, "Торпедо", "Зенит", 0, 0, datetime.now() + timedelta(days=1), "scheduled", "https://vk.com/video?embed=67890"),
-                    (2, "Локомотив", "Челси", 0, 0, datetime.now() + timedelta(days=3), "scheduled", "https://vk.com/video?embed=54321"),
-                    (2, "Динамо", "Зенит", 0, 0, datetime.now() + timedelta(days=4), "scheduled", "https://vk.com/video?embed=09876"),
-                    (3, "Спартак", "Торпедо", 0, 0, datetime.now() + timedelta(days=7), "scheduled", "https://vk.com/video?embed=11223"),
-                    (3, "Челси", "Динамо", 0, 0, datetime.now() + timedelta(days=8), "scheduled", "https://vk.com/video?embed=44556")
-                ]
-                
-                for match in matches:
-                    conn.execute(sql_text(
-                        "INSERT INTO matches (round, team1, team2, score1, score2, datetime, status, stream_url) "
-                        "VALUES (:round, :team1, :team2, :score1, :score2, :datetime, :status, :stream_url)"
-                    ), {
-                        "round": match[0],
-                        "team1": match[1],
-                        "team2": match[2],
-                        "score1": match[3],
-                        "score2": match[4],
-                        "datetime": match[5],
-                        "status": match[6],
-                        "stream_url": match[7]
-                    })
-                
-                # Добавляем формы команд
-                teams = ["Динамо", "Спартак", "Торпедо", "Зенит", "Локомотив", "Челси"]
-                forms = ["В", "П", "Н", "В", "В", "В/П/Н/В/П", "В/П/Н/В/П", "В/В/В/В/В", "П/П/П/П/П"]
-                
-                for team in teams:
-                    form = random.choice(forms)
-                    conn.execute(sql_text(
-                        "INSERT INTO team_form (team, form) VALUES (:team, :form)"
-                    ), {"team": team, "form": form})
-                
-                # Добавляем составы команд
-                players = [
-                    ("Динамо", "Иванов И.", "Вратарь", 1),
-                    ("Динамо", "Петров П.", "Защитник", 2),
-                    ("Спартак", "Сидоров С.", "Нападающий", 10),
-                    ("Спартак", "Козлов К.", "Полузащитник", 7),
-                    ("Торпедо", "Федоров Ф.", "Вратарь", 1),
-                    ("Торпедо", "Николаев Н.", "Нападающий", 9)
-                ]
-                
-                for player in players:
-                    conn.execute(sql_text(
-                        "INSERT INTO team_players (team, player, position, number) "
-                        "VALUES (:team, :player, :position, :number)"
-                    ), {
-                        "team": player[0],
-                        "player": player[1],
-                        "position": player[2],
-                        "number": player[3]
-                    })
-                
-                conn.commit()
-                logger.info("Тестовые данные успешно созданы")
+        creds_dict = json.loads(GS_CREDS_JSON)
+        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        gs_client = gspread.authorize(creds)
+        sheet = gs_client.open_by_key(GS_SHEET_ID)
+        logger.info("Google Sheets connected")
     except Exception as e:
-        logger.error(f"Ошибка генерации тестовых данных: {e}")
+        logger.warning("Google Sheets connection failed: %s", e)
+        gs_client = None
 
-generate_test_data()
+# --- Flask and TeleBot ---
+app = Flask(__name__, static_folder='static', template_folder='templates')
+app.secret_key = os.getenv("FLASK_SECRET", "supersecret")
 
-# --- Функции для работы с матчами ---
-def get_matches(round_number=None):
-    try:
-        with engine.connect() as conn:
-            if round_number:
-                result = conn.execute(sql_text(
-                    "SELECT id, round, team1, team2, score1, score2, datetime, status, stream_url "
-                    "FROM matches WHERE round = :round ORDER BY datetime"
-                ), {"round": round_number})
+bot = telebot.TeleBot(TOKEN)
+# remove webhook then set
+try:
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    logger.info("Webhook set to %s", WEBHOOK_URL)
+except Exception as e:
+    logger.warning("Failed to set webhook: %s", e)
+
+# --- Helpers ---
+def ensure_user_exists(user_id, username=None, display_name=None, referrer=None):
+    with engine.connect() as conn:
+        r = conn.execute(sql_text("SELECT id FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        if not r:
+            conn.execute(sql_text(
+                "INSERT INTO users (id, username, display_name, referrer) VALUES (:id, :username, :display_name, :referrer)"
+            ), {"id": user_id, "username": username or "", "display_name": display_name or "", "referrer": referrer})
+            conn.commit()
+
+def user_level_for_xp(xp):
+    """Example XP -> level mapping (progressive). Returns level and xp needed for next."""
+    # simple: level increases every 100 xp up to 100 level
+    level = min(100, xp // 100 + 1)
+    next_xp = (level) * 100
+    return level, next_xp
+
+def add_xp(user_id, xp_amount, reason=""):
+    with engine.connect() as conn:
+        row = conn.execute(sql_text("SELECT xp, level FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        if not row:
+            return
+        new_xp = (row.xp or 0) + xp_amount
+        level, next_xp = user_level_for_xp(new_xp)
+        badges_added = []
+        # if new milestones reached, give badge or promo
+        if level >= 10 and "lvl10" not in (row.badges or ""):
+            badges_added.append("lvl10")
+        if level >= 25 and "lvl25" not in (row.badges or ""):
+            badges_added.append("lvl25")
+        if level >= 50 and "lvl50" not in (row.badges or ""):
+            badges_added.append("lvl50")
+        if level >= 100 and "lvl100" not in (row.badges or ""):
+            badges_added.append("lvl100")
+        # update DB
+        new_badges = (row.badges or "")
+        for b in badges_added:
+            if new_badges:
+                new_badges += "," + b
             else:
-                result = conn.execute(sql_text(
-                    "SELECT id, round, team1, team2, score1, score2, datetime, status, stream_url "
-                    "FROM matches ORDER BY datetime"
-                ))
-            return result.fetchall()
-    except Exception as e:
-        logger.error(f"Ошибка получения матчей: {e}")
-        return []
+                new_badges = b
+        conn.execute(sql_text("UPDATE users SET xp = :xp, level = :level, badges = :badges, last_active = NOW() WHERE id = :id"),
+                     {"xp": new_xp, "level": level, "badges": new_badges, "id": user_id})
+        conn.commit()
+        # If promo code milestone hit, create a coupon order or save promo to user (this is simplified)
+        for lvl in PROMOCODES_BY_LEVEL:
+            if level >= lvl and str(lvl) not in (row.badges or ""):
+                # attach promo as badge to avoid double awarding (reuse badge store)
+                logger.info("User %s reached level %s, awarding promo %s", user_id, lvl, PROMOCODES_BY_LEVEL[lvl])
+        return level
 
-def get_match(match_id):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT id, round, team1, team2, score1, score2, datetime, status, stream_url "
-                "FROM matches WHERE id = :match_id"
-            ), {"match_id": match_id})
-            return result.fetchone()
-    except Exception as e:
-        logger.error(f"Ошибка получения матча: {e}")
-        return None
+def current_online_counts():
+    with engine.connect() as conn:
+        total = conn.execute(sql_text("SELECT COUNT(*) FROM users")).scalar()
+        online = conn.execute(sql_text("SELECT COUNT(*) FROM active_sessions WHERE last_active > NOW() - INTERVAL '5 minutes'")).scalar()
+        # daily etc (simple)
+        today = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '1 day'")).scalar()
+        week = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '7 days'")).scalar()
+    return {"total": total, "online": online, "today": today, "week": week}
 
-def get_team_form(team):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT form FROM team_form WHERE team = :team"
-            ), {"team": team})
-            row = result.fetchone()
-            return row[0] if row else "-/-/-/-/-"
-    except Exception as e:
-        logger.error(f"Ошибка получения формы команды: {e}")
-        return "-/-/-/-/-"
-
-def get_team_players(team):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT player, position, number FROM team_players WHERE team = :team"
-            ), {"team": team})
-            return result.fetchall()
-    except Exception as e:
-        logger.error(f"Ошибка получения состава команды: {e}")
-        return []
-
-def update_match_score(match_id, score1, score2):
-    try:
-        with engine.connect() as conn:
-            conn.execute(sql_text(
-                "UPDATE matches SET score1 = :score1, score2 = :score2, last_updated = CURRENT_TIMESTAMP "
-                "WHERE id = :match_id"
-            ), {
-                "score1": score1,
-                "score2": score2,
-                "match_id": match_id
-            })
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка обновления счета: {e}")
-        return False
-
-# --- Система уведомлений ---
-def create_notification(user_id, match_id, event):
-    try:
-        with engine.connect() as conn:
-            conn.execute(sql_text(
-                "INSERT INTO notifications (user_id, match_id, event) "
-                "VALUES (:user_id, :match_id, :event)"
-            ), {
-                "user_id": user_id,
-                "match_id": match_id,
-                "event": event
-            })
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка создания уведомления: {e}")
-        return False
-
-def get_unseen_notifications(user_id):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT n.id, m.team1, m.team2, m.score1, m.score2, n.event "
-                "FROM notifications n "
-                "JOIN matches m ON n.match_id = m.id "
-                "WHERE n.user_id = :user_id AND n.seen = FALSE"
-            ), {"user_id": user_id})
-            return result.fetchall()
-    except Exception as e:
-        logger.error(f"Ошибка получения уведомлений: {e}")
-        return []
-
-def mark_notification_seen(notification_id):
-    try:
-        with engine.connect() as conn:
-            conn.execute(sql_text(
-                "UPDATE notifications SET seen = TRUE WHERE id = :id"
-            ), {"id": notification_id})
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка отметки уведомления: {e}")
-        return False
-
-# --- Подписки на матчи ---
-def subscribe_to_match(user_id, match_id):
-    try:
-        with engine.connect() as conn:
-            # Проверяем, не подписан ли уже
-            result = conn.execute(sql_text(
-                "SELECT 1 FROM match_subscriptions WHERE user_id = :user_id AND match_id = :match_id"
-            ), {"user_id": user_id, "match_id": match_id})
-            
-            if not result.fetchone():
-                conn.execute(sql_text(
-                    "INSERT INTO match_subscriptions (user_id, match_id) "
-                    "VALUES (:user_id, :match_id)"
-                ), {
-                    "user_id": user_id,
-                    "match_id": match_id
-                })
-                conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка подписки на матч: {e}")
-        return False
-
-def unsubscribe_from_match(user_id, match_id):
-    try:
-        with engine.connect() as conn:
-            conn.execute(sql_text(
-                "DELETE FROM match_subscriptions WHERE user_id = :user_id AND match_id = :match_id"
-            ), {
-                "user_id": user_id,
-                "match_id": match_id
-            })
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка отписки от матча: {e}")
-        return False
-
-def is_subscribed_to_match(user_id, match_id):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT 1 FROM match_subscriptions WHERE user_id = :user_id AND match_id = :match_id"
-            ), {"user_id": user_id, "match_id": match_id})
-            return bool(result.fetchone())
-    except Exception as e:
-        logger.error(f"Ошибка проверки подписки: {e}")
-        return False
-
-def get_match_subscribers(match_id):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT user_id FROM match_subscriptions WHERE match_id = :match_id"
-            ), {"match_id": match_id})
-            return [row[0] for row in result.fetchall()]
-    except Exception as e:
-        logger.error(f"Ошибка получения подписчиков: {e}")
-        return []
-
-# --- Отслеживание активных сессий ---
-def update_user_session(user_id, page):
-    try:
-        with engine.connect() as conn:
-            # Удаляем старую сессию
-            conn.execute(sql_text(
-                "DELETE FROM active_sessions WHERE user_id = :user_id"
-            ), {"user_id": user_id})
-            
-            # Добавляем новую
-            conn.execute(sql_text(
-                "INSERT INTO active_sessions (user_id, page) "
-                "VALUES (:user_id, :page)"
-            ), {
-                "user_id": user_id,
-                "page": page
-            })
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка обновления сессии: {e}")
-        return False
-
-def get_user_session(user_id):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sql_text(
-                "SELECT page, last_active FROM active_sessions "
-                "WHERE user_id = :user_id AND last_active > NOW() - INTERVAL '5 minutes'"
-            ), {"user_id": user_id})
-            return result.fetchone()
-    except Exception as e:
-        logger.error(f"Ошибка получения сессии: {e}")
-        return None
-
-# --- Мини-приложение ---
-app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Для сессий
-
+# --- Miniapp routes ---
 @app.route('/miniapp')
 def miniapp():
-    return render_template('miniapp.html')
+    # base page with WebApp JS that will set session via initData
+    return render_template('miniapp_index.html', miniapp_url=MINIAPP_URL, owner_id=OWNER_ID)
+
+@app.route('/miniapp/init', methods=['POST'])
+def miniapp_init():
+    """
+    Called from JS inside Telegram WebApp to register the user session.
+    Expect JSON: { "user_id": 12345, "username": "name", "display_name": "Full Name" }
+    """
+    data = request.json or {}
+    user_id = int(data.get('user_id', 0))
+    username = data.get('username') or ""
+    display_name = data.get('display_name') or ""
+    if not user_id:
+        return jsonify({"success": False}), 400
+    session['user_id'] = user_id
+    ensure_user_exists(user_id, username, display_name)
+    # update active session
+    with engine.connect() as conn:
+        conn.execute(sql_text("DELETE FROM active_sessions WHERE user_id = :id"), {"id": user_id})
+        conn.execute(sql_text("INSERT INTO active_sessions (user_id, page) VALUES (:id, :page) ON CONFLICT (user_id) DO UPDATE SET last_active=NOW(), page=:page"),
+                     {"id": user_id, "page": "home"})
+        conn.commit()
+    return jsonify({"success": True})
 
 @app.route('/miniapp/home')
 def miniapp_home():
     user_id = session.get('user_id', 0)
-    update_user_session(user_id, 'home')
-    return render_template('home.html')
+    # show top-level home (cards, latest matches)
+    rounds = []
+    for r in range(1,4):
+        matches = get_matches(r)
+        rounds.append({"number": r, "matches": matches})
+    return render_template('home.html', rounds=rounds, user_id=user_id, owner_id=OWNER_ID)
 
 @app.route('/miniapp/matches')
 def miniapp_matches():
     user_id = session.get('user_id', 0)
-    update_user_session(user_id, 'matches')
-    
-    # Получаем ближайшие 3 тура
     rounds = []
-    for round_num in range(1, 4):
-        matches = get_matches(round_num)
-        if matches:
-            rounds.append({
-                "number": round_num,
-                "matches": matches
-            })
-    
-    # Получаем активные уведомления пользователя
+    for r in range(1,4):
+        matches = get_matches(r)
+        rounds.append({"number": r, "matches": matches})
+    # unseen notifications
     notifications = get_unseen_notifications(user_id)
-    
-    return render_template('matches.html', rounds=rounds, notifications=notifications)
+    return render_template('matches.html', rounds=rounds, notifications=notifications, user_id=user_id)
 
 @app.route('/miniapp/match/<int:match_id>')
 def miniapp_match_detail(match_id):
     user_id = session.get('user_id', 0)
-    update_user_session(user_id, f'match_{match_id}')
-    
     match = get_match(match_id)
     if not match:
         return "Матч не найден", 404
-    
-    # Получаем форму команд
     form1 = get_team_form(match.team1)
     form2 = get_team_form(match.team2)
-    
-    # Получаем составы команд
     players1 = get_team_players(match.team1)
     players2 = get_team_players(match.team2)
-    
-    # Проверяем подписку пользователя
     subscribed = is_subscribed_to_match(user_id, match_id)
-    
-    return render_template('match_detail.html', 
-                          match=match, 
-                          form1=form1, 
-                          form2=form2,
-                          players1=players1,
-                          players2=players2,
-                          subscribed=subscribed)
-
-@app.route('/miniapp/notifications')
-def miniapp_notifications():
-    user_id = session.get('user_id', 0)
-    notifications = get_unseen_notifications(user_id)
-    return jsonify([{
-        "id": n.id,
-        "team1": n.team1,
-        "team2": n.team2,
-        "score1": n.score1,
-        "score2": n.score2,
-        "event": n.event
-    } for n in notifications])
-
-@app.route('/miniapp/notification/seen/<int:notification_id>')
-def mark_notification_seen_route(notification_id):
-    if mark_notification_seen(notification_id):
-        return jsonify({"success": True})
-    return jsonify({"success": False}), 500
+    return render_template('match_detail.html', match=match, form1=form1, form2=form2,
+                           players1=players1, players2=players2, subscribed=subscribed,
+                           user_id=user_id, OWNER_ID=OWNER_ID)
 
 @app.route('/miniapp/subscribe/<int:match_id>', methods=['POST'])
-def subscribe_match(match_id):
+def miniapp_subscribe(match_id):
     user_id = session.get('user_id', 0)
-    if subscribe_to_match(user_id, match_id):
-        return jsonify({"success": True})
-    return jsonify({"success": False}), 500
+    if not user_id:
+        return jsonify({"success": False}), 403
+    subscribe_to_match(user_id, match_id)
+    return jsonify({"success": True})
 
 @app.route('/miniapp/unsubscribe/<int:match_id>', methods=['POST'])
-def unsubscribe_match(match_id):
+def miniapp_unsubscribe(match_id):
     user_id = session.get('user_id', 0)
-    if unsubscribe_from_match(user_id, match_id):
+    if not user_id:
+        return jsonify({"success": False}), 403
+    unsubscribe_from_match(user_id, match_id)
+    return jsonify({"success": True})
+
+@app.route('/miniapp/update_score', methods=['POST'])
+def miniapp_update_score():
+    data = request.json or {}
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return jsonify({"success": False, "error": "access denied"}), 403
+    match_id = int(data.get('match_id'))
+    score1 = int(data.get('score1'))
+    score2 = int(data.get('score2'))
+    ok = update_match_score(match_id, score1, score2)
+    if ok:
+        send_score_update_notifications(match_id, score1, score2)
         return jsonify({"success": True})
     return jsonify({"success": False}), 500
 
-@app.route('/miniapp/update_score', methods=['POST'])
-def update_score():
-    data = request.json
-    match_id = data.get('match_id')
-    score1 = data.get('score1')
-    score2 = data.get('score2')
+@app.route('/miniapp/notifications')
+def miniapp_notifications_api():
     user_id = session.get('user_id', 0)
-    
-    # Проверяем права администратора
-    if user_id != OWNER_ID:
-        return jsonify({"success": False, "error": "Доступ запрещен"}), 403
-    
-    if update_match_score(match_id, score1, score2):
-        # Отправляем уведомления
-        send_score_update_notifications(match_id, score1, score2)
+    notes = get_unseen_notifications(user_id)
+    out = []
+    for n in notes:
+        out.append({
+            "id": n.id,
+            "team1": n.team1,
+            "team2": n.team2,
+            "score1": n.score1,
+            "score2": n.score2,
+            "event": n.event,
+            "created_at": str(n.created_at)
+        })
+    return jsonify(out)
+
+@app.route('/miniapp/mark_seen/<int:notif_id>', methods=['POST'])
+def miniapp_mark_seen(notif_id):
+    if mark_notification_seen(notif_id):
         return jsonify({"success": True})
-    
     return jsonify({"success": False}), 500
+
+# --- Admin panel (miniapp visible only if session user == owner) ---
+@app.route('/miniapp/admin')
+def miniapp_admin():
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return "Доступ запрещён", 403
+    stats = current_online_counts()
+    # latest comments
+    with engine.connect() as conn:
+        comments = conn.execute(sql_text("SELECT c.id, c.user_id, c.text, c.created_at, u.display_name FROM comments c LEFT JOIN users u ON c.user_id = u.id ORDER BY c.created_at DESC LIMIT 50")).fetchall()
+    return render_template('admin.html', stats=stats, comments=comments)
+
+@app.route('/miniapp/admin/delete_comment/<int:comment_id>', methods=['POST'])
+def admin_delete_comment(comment_id):
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return jsonify({"success": False}), 403
+    with engine.connect() as conn:
+        conn.execute(sql_text("DELETE FROM comments WHERE id = :id"), {"id": comment_id})
+        conn.commit()
+    return jsonify({"success": True})
+
+@app.route('/miniapp/admin/ban_user', methods=['POST'])
+def admin_ban_user():
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return jsonify({"success": False}), 403
+    data = request.json or {}
+    target = int(data.get('target'))
+    period = data.get('period')  # '10m', '1h', '1d', 'perm'
+    if period == 'perm':
+        until = datetime(3000,1,1)
+    else:
+        delta = {'10m':10, '1h':60, '1d':1440}.get(period, 10)
+        until = datetime.utcnow() + timedelta(minutes=delta)
+    with engine.connect() as conn:
+        conn.execute(sql_text("UPDATE users SET banned_until = :until WHERE id = :id"), {"until": until, "id": target})
+        conn.commit()
+    return jsonify({"success": True})
+
+# --- Telegram bot handlers ---
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    user = message.from_user
+    user_id = message.chat.id
+    ensure_user_exists(user_id, user.username, f"{user.first_name} {user.last_name or ''}")
+    # build keyboard
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(types.KeyboardButton("⚽ Открыть приложение"))
+    kb.add(types.KeyboardButton("📅 Ближайшие матчи"), types.KeyboardButton("👤 Профиль"))
+    kb.add(types.KeyboardButton("🛍️ Магазин"), types.KeyboardButton("📢 Поддержка"))
+    kb.add(types.KeyboardButton("🔗 Пригласить друга"))
+    bot.send_message(user_id, "Добро пожаловать в Лигу! Открой приложение через кнопку ниже.", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: m.text == "⚽ Открыть приложение")
+def open_app(message):
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("Открыть мини-приложение", web_app=types.WebAppInfo(url=MINIAPP_URL)))
+    bot.send_message(message.chat.id, "Откройте приложение:", reply_markup=kb)
+
+@bot.message_handler(func=lambda m: m.text == "🔗 Пригласить друга")
+def referral(message):
+    user = message.from_user
+    user_id = message.chat.id
+    # referral link: miniapp with ref param (we will parse in frontend)
+    ref_link = f"{MINIAPP_URL}?ref={user_id}"
+    bot.send_message(user_id, f"Поделитесь ссылкой с другом: {ref_link}\nЕсли друг зарегистрируется через неё — вы получите бонусы!")
+
+# Webhook processing
+@app.route(f"/{TOKEN}", methods=['POST'])
+def telegram_webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "", 200
+
+# --- Match helpers (simple wrappers) ---
+def get_matches(round_number=None):
+    with engine.connect() as conn:
+        if round_number:
+            rows = conn.execute(sql_text("SELECT * FROM matches WHERE round = :r ORDER BY datetime"), {"r": round_number}).fetchall()
+        else:
+            rows = conn.execute(sql_text("SELECT * FROM matches ORDER BY datetime")).fetchall()
+    return rows
+
+def get_match(match_id):
+    with engine.connect() as conn:
+        r = conn.execute(sql_text("SELECT * FROM matches WHERE id = :id"), {"id": match_id}).fetchone()
+    return r
+
+def get_team_form(team):
+    # simple: derive form randomly or from external table; here placeholder
+    return "-/-/-/-/-"
+
+def get_team_players(team):
+    # placeholder
+    return []
+
+def update_match_score(match_id, s1, s2):
+    try:
+        with engine.connect() as conn:
+            conn.execute(sql_text("UPDATE matches SET score1 = :s1, score2 = :s2, last_updated = NOW(), status = 'live' WHERE id = :id"),
+                         {"s1": s1, "s2": s2, "id": match_id})
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error("update_match_score: %s", e)
+        return False
+
+# --- Notifications & subscriptions ---
+def subscribe_to_match(user_id, match_id):
+    with engine.connect() as conn:
+        exists = conn.execute(sql_text("SELECT 1 FROM match_subscriptions WHERE user_id = :uid AND match_id = :mid"),
+                             {"uid": user_id, "mid": match_id}).fetchone()
+        if not exists:
+            conn.execute(sql_text("INSERT INTO match_subscriptions (user_id, match_id) VALUES (:uid, :mid)"),
+                         {"uid": user_id, "mid": match_id})
+            conn.commit()
+    return True
+
+def unsubscribe_from_match(user_id, match_id):
+    with engine.connect() as conn:
+        conn.execute(sql_text("DELETE FROM match_subscriptions WHERE user_id = :uid AND match_id = :mid"),
+                     {"uid": user_id, "mid": match_id})
+        conn.commit()
+    return True
+
+def is_subscribed_to_match(user_id, match_id):
+    with engine.connect() as conn:
+        r = conn.execute(sql_text("SELECT 1 FROM match_subscriptions WHERE user_id = :uid AND match_id = :mid"),
+                         {"uid": user_id, "mid": match_id}).fetchone()
+    return bool(r)
+
+def get_match_subscribers(match_id):
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text("SELECT user_id FROM match_subscriptions WHERE match_id = :mid"), {"mid": match_id}).fetchall()
+    return [r.user_id for r in rows]
+
+def create_notification(user_id, match_id, event):
+    with engine.connect() as conn:
+        conn.execute(sql_text("INSERT INTO notifications (user_id, match_id, event) VALUES (:uid, :mid, :ev)"),
+                     {"uid": user_id, "mid": match_id, "ev": event})
+        conn.commit()
+    return True
+
+def get_unseen_notifications(user_id):
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text(
+            "SELECT n.id, m.team1, m.team2, m.score1, m.score2, n.event, n.created_at "
+            "FROM notifications n JOIN matches m ON n.match_id = m.id WHERE n.user_id = :uid AND n.seen = FALSE ORDER BY n.created_at DESC"
+        ), {"uid": user_id}).fetchall()
+    return rows
+
+def mark_notification_seen(nid):
+    with engine.connect() as conn:
+        conn.execute(sql_text("UPDATE notifications SET seen = TRUE WHERE id = :id"), {"id": nid})
+        conn.commit()
+    return True
 
 def send_score_update_notifications(match_id, score1, score2):
     match = get_match(match_id)
     if not match:
         return
-    
-    # Получаем подписчиков матча
     subscribers = get_match_subscribers(match_id)
-    
-    # Формируем сообщение
-    message = f"⚽ Обновление счета!\n\n{match.team1} - {match.team2}\nНовый счет: {score1}:{score2}"
-    
-    for user_id in subscribers:
+    message = f"⚽ Обновление: {match.team1} - {match.team2}\nСчет {score1}:{score2}"
+    for uid in subscribers:
         try:
-            # Проверяем, находится ли пользователь в приложении
-            session_info = get_user_session(user_id)
-            if session_info:
-                # Если пользователь в приложении, но не на странице этого матча
-                if f'match_{match_id}' not in session_info.page:
-                    create_notification(user_id, match_id, "Изменение счета")
+            # if user has active session, create in-app notification, else send telegram message
+            with engine.connect() as conn:
+                sess = conn.execute(sql_text("SELECT page, last_active FROM active_sessions WHERE user_id = :id AND last_active > NOW() - INTERVAL '5 minutes'"), {"id": uid}).fetchone()
+            if sess:
+                # user online in-app but maybe not viewing this match
+                # create in-app notification
+                create_notification(uid, match_id, "Изменение счета")
             else:
-                # Если пользователь не в приложении, отправляем сообщение в Telegram
-                bot.send_message(user_id, message)
+                # send telegram notification
+                bot.send_message(uid, message)
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
+            logger.error("send notification err: %s", e)
 
-# --- Статические файлы для мини-приложения ---
-@app.route('/static/css/<path:filename>')
-def serve_css(filename):
-    return app.send_static_file(f'css/{filename}')
+# --- Google Sheets sync (periodic) ---
+def sync_to_sheets():
+    if not gs_client:
+        logger.warning("Google Sheets not configured; skipping sync")
+        return
+    while True:
+        try:
+            # example: push users to sheet "Users" and matches to "Matches"
+            try:
+                users_ws = sheet.worksheet("Users")
+            except Exception:
+                users_ws = sheet.add_worksheet("Users", rows=1000, cols=10)
+            with engine.connect() as conn:
+                rows = conn.execute(sql_text("SELECT id, username, display_name, level, xp, coins, badges, created_at FROM users ORDER BY created_at DESC")).fetchall()
+            data = [["id","username","display_name","level","xp","coins","badges","created_at"]]
+            for r in rows:
+                data.append([r.id, r.username, r.display_name, r.level, r.xp, r.coins, r.badges, str(r.created_at)])
+            users_ws.clear()
+            users_ws.update('A1', data)
+            # matches
+            try:
+                matches_ws = sheet.worksheet("Matches")
+            except Exception:
+                matches_ws = sheet.add_worksheet("Matches", rows=500, cols=10)
+            with engine.connect() as conn:
+                mrows = conn.execute(sql_text("SELECT id, round, team1, team2, score1, score2, datetime, status FROM matches ORDER BY datetime")).fetchall()
+            mdata = [["id","round","team1","team2","score1","score2","datetime","status"]]
+            for m in mrows:
+                mdata.append([m.id, m.round, m.team1, m.team2, m.score1, m.score2, str(m.datetime), m.status])
+            matches_ws.clear()
+            matches_ws.update('A1', mdata)
+            logger.info("Synced DB -> Google Sheets")
+        except Exception as e:
+            logger.error("Sheets sync err: %s", e)
+        # run every 6-12 hours (configurable). Here: 6 hours
+        time.sleep(6 * 3600)
 
-@app.route('/static/js/<path:filename>')
-def serve_js(filename):
-    return app.send_static_file(f'js/{filename}')
+# start sheets sync thread only if configured
+if gs_client:
+    t = threading.Thread(target=sync_to_sheets, daemon=True)
+    t.start()
 
-@app.route('/static/img/<path:filename>')
-def serve_img(filename):
-    return app.send_static_file(f'img/{filename}')
+# --- Test data generator (if no matches) ---
+def generate_test_matches():
+    with engine.connect() as conn:
+        cnt = conn.execute(sql_text("SELECT COUNT(*) FROM matches")).scalar()
+        if cnt == 0:
+            teams = [("Динамо","Спартак"),("Торпедо","Зенит"),("Локомотив","Челси"),("Динамо","Зенит")]
+            now = datetime.utcnow()
+            for i, pair in enumerate(teams, start=1):
+                conn.execute(sql_text("INSERT INTO matches (round, team1, team2, datetime, stream_url) VALUES (:r,:a,:b,:dt,:url)"),
+                             {"r": i, "a": pair[0], "b": pair[1], "dt": now + timedelta(days=i), "url": "https://www.youtube.com/embed/dQw4w9WgXcQ"})
+            conn.commit()
+            logger.info("Inserted test matches")
 
-# --- Инициализация бота ---
-bot = telebot.TeleBot(TOKEN)
-bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
+generate_test_matches()
 
-# --- Главное меню ---
-@bot.message_handler(commands=["start"])
-def start(message):
-    user_id = message.chat.id
-    
-    # Сохраняем user_id в сессии для мини-приложения
-    session['user_id'] = user_id
-    
-    # Клавиатура основного меню
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(
-        types.KeyboardButton("⚽ Открыть приложение"),
-        types.KeyboardButton("📅 Ближайшие матчи"),
-        types.KeyboardButton("👤 Профиль"),
-        types.KeyboardButton("📢 Поддержка")
-    )
-    
-    # Если есть активные уведомления
-    notifications = get_unseen_notifications(user_id)
-    if notifications:
-        kb.add(types.KeyboardButton("🔔 Уведомления"))
-    
-    bot.send_message(
-        user_id,
-        "🏆 Добро пожаловать в Футбольную Лигу!\n\n"
-        "Смотрите трансляции матчей прямо в приложении!",
-        reply_markup=kb
-    )
+# --- Static helpers for rendering templates ---
+@app.context_processor
+def inject_now():
+    return {'now': datetime.utcnow(), 'OWNER_ID': OWNER_ID}
 
-# --- Открытие мини-приложения ---
-@bot.message_handler(func=lambda m: m.text == "⚽ Открыть приложение")
-def open_miniapp(message):
-    keyboard = types.InlineKeyboardMarkup()
-    button = types.InlineKeyboardButton(
-        text="Открыть приложение лиги", 
-        web_app=types.WebAppInfo(url=MINIAPP_URL)
-    )
-    keyboard.add(button)
-    
-    bot.send_message(
-        message.chat.id,
-        "Нажмите кнопку ниже, чтобы открыть футбольное приложение:",
-        reply_markup=keyboard
-    )
-
-# --- Вебхук ---
-@app.route("/")
-def index():
-    return "Football League Bot is running!"
-
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    json_str = request.get_data().decode("UTF-8")
-    update = types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "", 200
-
-# --- Запуск приложения ---
+# --- Run ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    port = int(os.getenv("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port)

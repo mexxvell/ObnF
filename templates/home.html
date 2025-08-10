@@ -1,0 +1,26 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page page-home">
+  <section class="hero">
+    <h2>Добро пожаловать в Лигу</h2>
+    <p>Тут трансляции, прогнозы и магазин нашего мерча.</p>
+  </section>
+
+  <section class="cards">
+    <a class="card" href="/miniapp/matches" target="page-frame">
+      <h3>Ближайшие матчи</h3>
+      <p>Три ближайших тура и прямые трансляции</p>
+    </a>
+
+    <a class="card" href="/miniapp/shop" target="page-frame">
+      <h3>Магазин</h3>
+      <p>Футболки, кепки и фирменный мерч</p>
+    </a>
+
+    <a class="card" href="/miniapp/profile" target="page-frame">
+      <h3>Профиль</h3>
+      <p>Уровни, бейджи, рефералы</p>
+    </a>
+  </section>
+</div>
+{% endblock %}

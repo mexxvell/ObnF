@@ -1,0 +1,57 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page page-admin">
+  <h2>Панель администратора</h2>
+  <div class="stats">
+    <p>Онлайн сейчас: {{ stats.online }}</p>
+    <p>Всего пользователей: {{ stats.total }}</p>
+    <p>Зарегистрировалось сегодня: {{ stats.today }}</p>
+    <p>За 7 дней: {{ stats.week }}</p>
+  </div>
+
+  <h3>Комментарии</h3>
+  <table class="comments">
+    <tr><th>ID</th><th>Пользователь</th><th>Текст</th><th>Дата</th><th>Действие</th></tr>
+    {% for c in comments %}
+      <tr id="comment-{{ c.id }}">
+        <td>{{ c.id }}</td>
+        <td>{{ c.display_name or c.user_id }}</td>
+        <td>{{ c.text }}</td>
+        <td>{{ c.created_at }}</td>
+        <td>
+          <button class="del-comment" data-id="{{ c.id }}">Удалить</button>
+          <button class="ban-user" data-id="{{ c.user_id }}" data-period="10m">Бан 10м</button>
+          <button class="ban-user" data-id="{{ c.user_id }}" data-period="1h">Бан 1ч</button>
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', ()=>{
+    document.querySelectorAll('.del-comment').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id;
+        const res = await fetch(`/miniapp/admin/delete_comment/${id}`, {method:'POST'});
+        const j = await res.json();
+        if(j.success) document.getElementById('comment-'+id).remove();
+      });
+    });
+
+    document.querySelectorAll('.ban-user').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const target = btn.dataset.id;
+        const period = btn.dataset.period;
+        const res = await fetch('/miniapp/admin/ban_user', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({target, period})
+        });
+        const j = await res.json();
+        if(j.success) alert('Пользователь забанен');
+      });
+    });
+  });
+</script>
+{% endblock %}

@@ -1,107 +1,25 @@
-<div class="matches-container">
-    <h1>🗓️ Ближайшие матчи</h1>
-    
-    <!-- Уведомления о событиях -->
-    <div id="notification-container" class="notification-container hidden">
-        <div class="notification-banner flip-animation">
-            <div class="teams">
-                <img src="/static/img/dinamo.png" alt="Team1" class="team-logo">
-                <div class="score">
-                    <span id="notif-score1">0</span>:<span id="notif-score2">0</span>
-                </div>
-                <img src="/static/img/spartak.png" alt="Team2" class="team-logo">
-            </div>
-            <div class="event" id="notif-event">Гол!</div>
-            <button id="watch-live-btn">Смотреть ▶️</button>
-        </div>
-    </div>
-    
-    <!-- Список туров -->
-    {% for round in rounds %}
-    <div class="round-card">
-        <h2>Тур {{ round.number }}</h2>
-        
-        {% for match in round.matches %}
-        <div class="match-card" data-match-id="{{ match.id }}">
-            <div class="match-header">
-                <span class="match-time">{{ match.datetime.strftime('%d.%m %H:%M') }}</span>
-                {% if match.status == 'live' %}
-                <span class="live-badge">🔴 LIVE</span>
-                {% endif %}
-            </div>
-            
-            <div class="teams">
-                <div class="team">
-                    <img src="/static/img/{{ match.team1|lower }}.png" alt="{{ match.team1 }}" class="team-logo">
-                    <span class="team-name">{{ match.team1 }}</span>
-                </div>
-                
-                <div class="score">
-                    {{ match.score1 }}:{{ match.score2 }}
-                </div>
-                
-                <div class="team">
-                    <img src="/static/img/{{ match.team2|lower }}.png" alt="{{ match.team2 }}" class="team-logo">
-                    <span class="team-name">{{ match.team2 }}</span>
-                </div>
-            </div>
-            
-            <div class="match-actions">
-                <button class="btn-details" data-match-id="{{ match.id }}">Подробнее</button>
-                {% if match.status == 'live' %}
-                <button class="btn-watch" data-stream-url="{{ match.stream_url }}">Смотреть</button>
-                {% endif %}
-            </div>
-        </div>
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page page-matches">
+  <h2>Ближайшие туры</h2>
+  {% for round in rounds %}
+    <div class="round">
+      <h3>{{ "Тур " ~ round.number }}</h3>
+      <ul class="match-list">
+        {% for m in round.matches %}
+          <li class="match-item">
+            <a href="/miniapp/match/{{ m.id }}" target="page-frame" class="match-link">
+              <div class="teams">
+                <span class="team">{{ m.team1 }}</span>
+                <span class="vs">—</span>
+                <span class="team">{{ m.team2 }}</span>
+              </div>
+              <div class="meta">{{ m.datetime.strftime('%d.%m %H:%M') if m.datetime else '' }}</div>
+            </a>
+          </li>
         {% endfor %}
+      </ul>
     </div>
-    {% endfor %}
+  {% endfor %}
 </div>
-
-
-<script>
-<script src="/static/js/matches.js"></script>
-<script src="/static/js/notifications.js"></script>
-    
-    // Проверка обновлений счёта
-    function checkScoreUpdates() {
-        const matchCards = document.querySelectorAll('.match-card[data-match-id]');
-        const matchIds = Array.from(matchCards).map(card => card.dataset.matchId);
-        
-        if (matchIds.length === 0) return;
-        
-        fetch('/miniapp/match_scores', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ match_ids: matchIds })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                data.scores.forEach(score => {
-                    const card = document.querySelector(`.match-card[data-match-id="${score.id}"]`);
-                    if (card) {
-                        const scoreElement = card.querySelector('.score');
-                        if (scoreElement.textContent !== `${score.score1}:${score.score2}`) {
-                            // Обновляем счёт с анимацией
-                            scoreElement.textContent = `${score.score1}:${score.score2}`;
-                            scoreElement.classList.add('score-update-animation');
-                            setTimeout(() => {
-                                scoreElement.classList.remove('score-update-animation');
-                            }, 1000);
-                        }
-                    }
-                });
-            }
-        });
-    }
-    
-    // Проверяем обновления каждые 10 секунд
-    setInterval(checkScoreUpdates, 10000);
-    
-    // Инициализация при загрузке
-    document.addEventListener('DOMContentLoaded', () => {
-        checkNotifications();
-        checkScoreUpdates();
-    });
-</script>
+{% endblock %}
