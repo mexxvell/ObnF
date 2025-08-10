@@ -474,7 +474,7 @@ def miniapp_profile():
         logger.error(f"Ошибка при загрузке профиля для user_id={user_id}: {str(e)}", exc_info=True)
         return "Internal server error", 500
         
-        @app.route('/miniapp/profile/edit', methods=['GET'])
+@app.route('/miniapp/profile/edit', methods=['GET'])
 def miniapp_profile_edit():
     user_id = session.get('user_id', 0)
     if not user_id:
