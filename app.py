@@ -1231,6 +1231,7 @@ def get_user_stats(user_id):
             "user_id": user_id
         }).scalar()
         
+        # ВЫЧИСЛЕНИЕ won_bets И lost_bets ДОЛЖНО БЫТЬ ЗДЕСЬ, ПЕРЕД RETURN
         won_bets = 0
         lost_bets = 0
         
@@ -1300,6 +1301,7 @@ def get_user_stats(user_id):
             logger.error(f"Error getting top users: {e}")
             top_users = []
     
+    # ТОЛЬКО ТЕПЕРЬ МОЖНО ВЫПОЛНИТЬ RETURN
     return {
         "total_bets": total_bets,
         "won_bets": won_bets,
@@ -1314,9 +1316,6 @@ def get_user_stats(user_id):
             "avg_odds": round(u.avg_odds, 2) if u.avg_odds else 1.0
         } for u in top_users]
     }
-        
-        won_bets = 0
-        lost_bets = 0
         
         if has_status_column:
             won_bets = conn.execute(sql_text("""
