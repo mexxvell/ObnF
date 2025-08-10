@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 from flask import Flask, request, render_template, jsonify, session, redirect, url_for
@@ -14,29 +14,16 @@ from sqlalchemy import create_engine, text as sql_text
 import random
 
 # Optional: gspread for Google Sheets integration
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
-# Подключение к Google Sheets
-def connect_to_sheets():
-    try:
-        creds_dict = json.loads(os.getenv("GS_CREDS_JSON"))
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key("YOUR_SPREADSHEET_ID").worksheet("ТАБЛИЦА")
-        return sheet
-    except Exception as e:
-        logger.error(f"Google Sheets error: {e}")
-        return None
-
-# Получение данных
-def get_teams_from_sheet():
-    sheet = connect_to_sheets()
-    if not sheet:
-        return []
-    data = sheet.get_all_records()
-    return data
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    GS_ENABLED = True
+    logger = logging.getLogger(__name__)
+    logger.info("gspread и oauth2client успешно импортированы")
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.warning("gspread не установлен: %s", e)
+    GS_ENABLED = False
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -166,13 +153,14 @@ init_db()
 
 # --- gspread (Google Sheets) setup ---
 gs_client = None
+sheet = None
 if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
     try:
         creds_dict = json.loads(GS_CREDS_JSON)
         scope = [
-    'https://spreadsheets.google.com/feeds',
-    'https://www.googleapis.com/auth/drive'
-]
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive'
+        ]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gs_client = gspread.authorize(creds)
         sheet = gs_client.open_by_key(GS_SHEET_ID)
@@ -181,8 +169,12 @@ if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
         logger.error("Google Sheets connection failed: %s", e)
         gs_client = None
 else:
-    logger.info("Google Sheets is not enabled (GS_ENABLED=%s, GS_CREDS_JSON=%s, GS_SHEET_ID=%s)", 
-                GS_ENABLED, bool(GS_CREDS_JSON), bool(GS_SHEET_ID))
+    status = {
+        "GS_ENABLED": GS_ENABLED,
+        "GS_CREDS_JSON": bool(GS_CREDS_JSON),
+        "GS_SHEET_ID": bool(GS_SHEET_ID)
+    }
+    logger.info("Google Sheets is not enabled. Status: %s", status)
     gs_client = None
 
 # --- Flask and TeleBot ---
@@ -198,75 +190,15 @@ try:
 except Exception as e:
     logger.warning("Failed to set webhook: %s", e)
 
-# --- Helpers ---
-def ensure_user_exists(user_id, username=None, display_name=None, referrer=None):
-    with engine.connect() as conn:
-        r = conn.execute(sql_text("SELECT id FROM users WHERE id = :id"), {"id": user_id}).fetchone()
-        if not r:
-            conn.execute(sql_text(
-                "INSERT INTO users (id, username, display_name, referrer) VALUES (:id, :username, :display_name, :referrer)"
-            ), {"id": user_id, "username": username or "", "display_name": display_name or "", "referrer": referrer})
-            conn.commit()
-
-def user_level_for_xp(xp):
-    """Example XP -> level mapping (progressive). Returns level and xp needed for next."""
-    # simple: level increases every 100 xp up to 100 level
-    level = min(100, xp // 100 + 1)
-    next_xp = (level) * 100
-    return level, next_xp
-
-def add_xp(user_id, xp_amount, reason=""):
-    with engine.connect() as conn:
-        row = conn.execute(sql_text("SELECT xp, level FROM users WHERE id = :id"), {"id": user_id}).fetchone()
-        if not row:
-            return
-        new_xp = (row.xp or 0) + xp_amount
-        level, next_xp = user_level_for_xp(new_xp)
-        badges_added = []
-        # if new milestones reached, give badge or promo
-        if level >= 10 and "lvl10" not in (row.badges or ""):
-            badges_added.append("lvl10")
-        if level >= 25 and "lvl25" not in (row.badges or ""):
-            badges_added.append("lvl25")
-        if level >= 50 and "lvl50" not in (row.badges or ""):
-            badges_added.append("lvl50")
-        if level >= 100 and "lvl100" not in (row.badges or ""):
-            badges_added.append("lvl100")
-        # update DB
-        new_badges = (row.badges or "")
-        for b in badges_added:
-            if new_badges:
-                new_badges += "," + b
-            else:
-                new_badges = b
-        conn.execute(sql_text("UPDATE users SET xp = :xp, level = :level, badges = :badges, last_active = NOW() WHERE id = :id"),
-                     {"xp": new_xp, "level": level, "badges": new_badges, "id": user_id})
-        conn.commit()
-        # If promo code milestone hit, create a coupon order or save promo to user (this is simplified)
-        for lvl in PROMOCODES_BY_LEVEL:
-            if level >= lvl and str(lvl) not in (row.badges or ""):
-                # attach promo as badge to avoid double awarding (reuse badge store)
-                logger.info("User %s reached level %s, awarding promo %s", user_id, lvl, PROMOCODES_BY_LEVEL[lvl])
-        return level
-
-def current_online_counts():
-    with engine.connect() as conn:
-        total = conn.execute(sql_text("SELECT COUNT(*) FROM users")).scalar()
-        online = conn.execute(sql_text("SELECT COUNT(*) FROM active_sessions WHERE last_active > NOW() - INTERVAL '5 minutes'")).scalar()
-        # daily etc (simple)
-        today = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '1 day'")).scalar()
-        week = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '7 days'")).scalar()
-    return {"total": total, "online": online, "today": today, "week": week}
-
 # --- Miniapp routes ---
+@app.route('/')
+def index():
+    return redirect(url_for('miniapp'))
+
 @app.route('/miniapp')
 def miniapp():
     # base page with WebApp JS that will set session via initData
     return render_template('miniapp_index.html', miniapp_url=MINIAPP_URL, owner_id=OWNER_ID)
-    
-@app.route('/')
-def index():
-    return redirect(url_for('miniapp'))
 
 @app.route('/miniapp/init', methods=['POST'])
 def miniapp_init():
@@ -283,11 +215,10 @@ def miniapp_init():
     session['user_id'] = user_id
     ensure_user_exists(user_id, username, display_name)
     # update active session
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text("DELETE FROM active_sessions WHERE user_id = :id"), {"id": user_id})
         conn.execute(sql_text("INSERT INTO active_sessions (user_id, page) VALUES (:id, :page) ON CONFLICT (user_id) DO UPDATE SET last_active=NOW(), page=:page"),
                      {"id": user_id, "page": "home"})
-        conn.commit()
     return jsonify({"success": True})
 
 @app.route('/miniapp/profile')
@@ -319,15 +250,15 @@ def miniapp_profile_api():
  
 @app.route('/miniapp/standings')
 def miniapp_standings():
-    if not gs_client:
+    if not gs_client or not sheet:
         return "Google Sheets не настроен", 500
     try:
         ws = sheet.worksheet("ТАБЛИЦА")
         data = ws.get_all_values()
+        return render_template('standings.html', table=data)
     except Exception as e:
         logger.error(f"Ошибка чтения Google Sheets: {e}")
         return "Ошибка чтения данных", 500
-    return render_template('standings.html', table=data)
 
 @app.route('/miniapp/create_order', methods=['POST'])
 def miniapp_create_order():
@@ -339,11 +270,10 @@ def miniapp_create_order():
     price = int(data.get('price', 0))
     if not item or price <= 0:
         return jsonify({"success": False, "error": "invalid"}), 400
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text(
             "INSERT INTO orders (user_id, item, price) VALUES (:uid, :item, :price)"
         ), {"uid": user_id, "item": item, "price": price})
-        conn.commit()
     return jsonify({"success": True})
 
 @app.route('/miniapp/support')
@@ -465,9 +395,8 @@ def admin_delete_comment(comment_id):
     user_id = session.get('user_id', 0)
     if user_id != OWNER_ID:
         return jsonify({"success": False}), 403
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text("DELETE FROM comments WHERE id = :id"), {"id": comment_id})
-        conn.commit()
     return jsonify({"success": True})
 
 @app.route('/miniapp/admin/ban_user', methods=['POST'])
@@ -482,10 +411,9 @@ def admin_ban_user():
         until = datetime(3000,1,1)
     else:
         delta = {'10m':10, '1h':60, '1d':1440}.get(period, 10)
-        until = datetime.utcnow() + timedelta(minutes=delta)
-    with engine.connect() as conn:
+        until = datetime.now(timezone.utc) + timedelta(minutes=delta)
+    with engine.begin() as conn:
         conn.execute(sql_text("UPDATE users SET banned_until = :until WHERE id = :id"), {"until": until, "id": target})
-        conn.commit()
     return jsonify({"success": True})
 
 # --- Telegram bot handlers ---
@@ -494,9 +422,8 @@ def handle_start(message):
     user = message.from_user
     user_id = message.chat.id
     ensure_user_exists(user_id, user.username, f"{user.first_name} {user.last_name or ''}")
-    
-    # УБРАЛИ КЛАВИАТУРУ - просто отправляем сообщение
-    bot.send_message(user_id, "Добро пожаловать в Лигу! Нажмите кнопку 'Open' рядом со скрепкой.")
+    # Просто отправляем приветственное сообщение БЕЗ клавиатуры
+    bot.send_message(user_id, "Добро пожаловать в Лигу! Нажмите кнопку 'Open' рядом со скрепкой, чтобы открыть приложение.")
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Пригласить друга")
 def referral(message):
@@ -513,6 +440,64 @@ def telegram_webhook():
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return "", 200
+
+# --- Helpers ---
+def ensure_user_exists(user_id, username=None, display_name=None, referrer=None):
+    with engine.begin() as conn:
+        r = conn.execute(sql_text("SELECT id FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        if not r:
+            conn.execute(sql_text(
+                "INSERT INTO users (id, username, display_name, referrer) VALUES (:id, :username, :display_name, :referrer)"
+            ), {"id": user_id, "username": username or "", "display_name": display_name or "", "referrer": referrer})
+
+def user_level_for_xp(xp):
+    """Example XP -> level mapping (progressive). Returns level and xp needed for next."""
+    # simple: level increases every 100 xp up to 100 level
+    level = min(100, xp // 100 + 1)
+    next_xp = (level) * 100
+    return level, next_xp
+
+def add_xp(user_id, xp_amount, reason=""):
+    with engine.begin() as conn:
+        row = conn.execute(sql_text("SELECT xp, level FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        if not row:
+            return
+        new_xp = (row.xp or 0) + xp_amount
+        level, next_xp = user_level_for_xp(new_xp)
+        badges_added = []
+        # if new milestones reached, give badge or promo
+        if level >= 10 and "lvl10" not in (row.badges or ""):
+            badges_added.append("lvl10")
+        if level >= 25 and "lvl25" not in (row.badges or ""):
+            badges_added.append("lvl25")
+        if level >= 50 and "lvl50" not in (row.badges or ""):
+            badges_added.append("lvl50")
+        if level >= 100 and "lvl100" not in (row.badges or ""):
+            badges_added.append("lvl100")
+        # update DB
+        new_badges = (row.badges or "")
+        for b in badges_added:
+            if new_badges:
+                new_badges += "," + b
+            else:
+                new_badges = b
+        conn.execute(sql_text("UPDATE users SET xp = :xp, level = :level, badges = :badges, last_active = NOW() WHERE id = :id"),
+                     {"xp": new_xp, "level": level, "badges": new_badges, "id": user_id})
+        # If promo code milestone hit, create a coupon order or save promo to user (this is simplified)
+        for lvl in PROMOCODES_BY_LEVEL:
+            if level >= lvl and str(lvl) not in (row.badges or ""):
+                # attach promo as badge to avoid double awarding (reuse badge store)
+                logger.info("User %s reached level %s, awarding promo %s", user_id, lvl, PROMOCODES_BY_LEVEL[lvl])
+        return level
+
+def current_online_counts():
+    with engine.connect() as conn:
+        total = conn.execute(sql_text("SELECT COUNT(*) FROM users")).scalar()
+        online = conn.execute(sql_text("SELECT COUNT(*) FROM active_sessions WHERE last_active > NOW() - INTERVAL '5 minutes'")).scalar()
+        # daily etc (simple)
+        today = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '1 day'")).scalar()
+        week = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '7 days'")).scalar()
+    return {"total": total, "online": online, "today": today, "week": week}
 
 # --- Match helpers (simple wrappers) ---
 def get_matches(round_number=None):
@@ -537,32 +522,25 @@ def get_team_players(team):
     return []
 
 def update_match_score(match_id, s1, s2):
-    try:
-        with engine.connect() as conn:
-            conn.execute(sql_text("UPDATE matches SET score1 = :s1, score2 = :s2, last_updated = NOW(), status = 'live' WHERE id = :id"),
-                         {"s1": s1, "s2": s2, "id": match_id})
-            conn.commit()
-        return True
-    except Exception as e:
-        logger.error("update_match_score: %s", e)
-        return False
+    with engine.begin() as conn:
+        conn.execute(sql_text("UPDATE matches SET score1 = :s1, score2 = :s2, last_updated = NOW(), status = 'live' WHERE id = :id"),
+                     {"s1": s1, "s2": s2, "id": match_id})
+    return True
 
 # --- Notifications & subscriptions ---
 def subscribe_to_match(user_id, match_id):
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         exists = conn.execute(sql_text("SELECT 1 FROM match_subscriptions WHERE user_id = :uid AND match_id = :mid"),
                              {"uid": user_id, "mid": match_id}).fetchone()
         if not exists:
             conn.execute(sql_text("INSERT INTO match_subscriptions (user_id, match_id) VALUES (:uid, :mid)"),
                          {"uid": user_id, "mid": match_id})
-            conn.commit()
     return True
 
 def unsubscribe_from_match(user_id, match_id):
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text("DELETE FROM match_subscriptions WHERE user_id = :uid AND match_id = :mid"),
                      {"uid": user_id, "mid": match_id})
-        conn.commit()
     return True
 
 def is_subscribed_to_match(user_id, match_id):
@@ -577,10 +555,9 @@ def get_match_subscribers(match_id):
     return [r.user_id for r in rows]
 
 def create_notification(user_id, match_id, event):
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text("INSERT INTO notifications (user_id, match_id, event) VALUES (:uid, :mid, :ev)"),
                      {"uid": user_id, "mid": match_id, "ev": event})
-        conn.commit()
     return True
 
 def get_unseen_notifications(user_id):
@@ -592,9 +569,8 @@ def get_unseen_notifications(user_id):
     return rows
 
 def mark_notification_seen(nid):
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(sql_text("UPDATE notifications SET seen = TRUE WHERE id = :id"), {"id": nid})
-        conn.commit()
     return True
 
 def send_score_update_notifications(match_id, score1, score2):
@@ -620,7 +596,7 @@ def send_score_update_notifications(match_id, score1, score2):
 
 # --- Google Sheets sync (periodic) ---
 def sync_to_sheets():
-    if not gs_client:
+    if not gs_client or not sheet:
         logger.warning("Google Sheets not configured; skipping sync")
         return
     while True:
@@ -656,7 +632,7 @@ def sync_to_sheets():
         time.sleep(6 * 3600)
 
 # start sheets sync thread only if configured
-if gs_client:
+if gs_client and sheet:
     t = threading.Thread(target=sync_to_sheets, daemon=True)
     t.start()
 
@@ -666,7 +642,7 @@ def generate_test_matches():
         cnt = conn.execute(sql_text("SELECT COUNT(*) FROM matches")).scalar()
         if cnt == 0:
             teams = [("Динамо","Спартак"),("Торпедо","Зенит"),("Локомотив","Челси"),("Динамо","Зенит")]
-            now = datetime.now(timezone.utc)  # Исправлено!
+            now = datetime.now(timezone.utc)
             for i, pair in enumerate(teams, start=1):
                 conn.execute(sql_text("INSERT INTO matches (round, team1, team2, datetime, stream_url) VALUES (:r,:a,:b,:dt,:url)"),
                              {"r": i, "a": pair[0], "b": pair[1], "dt": now + timedelta(days=i), "url": "https://www.youtube.com/embed/dQw4w9WgXcQ"})
@@ -677,7 +653,7 @@ generate_test_matches()
 # --- Static helpers for rendering templates ---
 @app.context_processor
 def inject_now():
-    return {'now': datetime.utcnow(), 'OWNER_ID': OWNER_ID}
+    return {'now': datetime.now(timezone.utc), 'OWNER_ID': OWNER_ID}
 
 # --- Run ---
 if __name__ == "__main__":
