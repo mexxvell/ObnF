@@ -67,7 +67,7 @@ engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 
 def init_db():
     with engine.connect() as conn:
-        # Создаем таблицу users если не существует
+        # users table
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS users (
                 id BIGINT PRIMARY KEY,
@@ -80,7 +80,10 @@ def init_db():
                 referrer BIGINT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                banned_until TIMESTAMP
+                banned_until TIMESTAMP,
+                full_name TEXT,
+                birth_date DATE,
+                favorite_club TEXT
             )
         '''))
         
@@ -100,7 +103,20 @@ def init_db():
         if 'last_streak_date' not in existing_columns:
             conn.execute(sql_text("ALTER TABLE users ADD COLUMN last_streak_date DATE"))
             logger.info("Added 'last_streak_date' column to users table")
-            
+        
+        # Добавляем новые колонки, если их нет
+        if 'full_name' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE users ADD COLUMN full_name TEXT"))
+            logger.info("Added 'full_name' column to users table")
+        
+        if 'birth_date' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE users ADD COLUMN birth_date DATE"))
+            logger.info("Added 'birth_date' column to users table")
+        
+        if 'favorite_club' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE users ADD COLUMN favorite_club TEXT"))
+            logger.info("Added 'favorite_club' column to users table")
+        
         # matches
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS matches (
@@ -111,7 +127,7 @@ def init_db():
                 score1 INTEGER DEFAULT 0,
                 score2 INTEGER DEFAULT 0,
                 datetime TIMESTAMP,
-                status TEXT DEFAULT 'scheduled', -- scheduled/live/finished
+                status TEXT DEFAULT 'scheduled',
                 stream_url TEXT,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 odds_team1 INTEGER DEFAULT 35,
@@ -119,115 +135,32 @@ def init_db():
                 odds_draw INTEGER DEFAULT 0
             )
         '''))
-        # subscriptions
+        
+        # products table
         conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS match_subscriptions (
+            CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                match_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        # comments
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS comments (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                match_id INTEGER,
-                text TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        # notifications
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                match_id INTEGER,
-                event TEXT,
-                seen BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        # shop orders
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                item TEXT,
+                name TEXT,
                 price INTEGER,
-                status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        # active sessions
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS active_sessions (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT UNIQUE,
-                page TEXT,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        # bets table
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS bets (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                match_id INTEGER,
-                type TEXT,  -- team1, team2, draw, total_goals, penalty, red_card
-                amount INTEGER,
-                prediction TEXT,  -- для ставок на точное количество голов
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'active',  -- active, won, lost, settled
-                payout INTEGER DEFAULT 0
+                image TEXT,
+                description TEXT,
+                stock INTEGER DEFAULT 100
             )
         '''))
         
-        # Проверяем и добавляем недостающие колонки в таблицу bets
+        # Проверяем и добавляем недостающие колонки в таблицу products
         existing_columns = [row[0] for row in conn.execute(sql_text("""
             SELECT column_name 
             FROM information_schema.columns 
-            WHERE table_name = 'bets'
+            WHERE table_name = 'products'
         """))]
         
-        if 'status' not in existing_columns:
-            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN status TEXT DEFAULT 'active'"))
-            logger.info("Added 'status' column to bets table")
+        if 'stock' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 100"))
+            logger.info("Added 'stock' column to products table")
         
-        if 'payout' not in existing_columns:
-            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN payout INTEGER DEFAULT 0"))
-            logger.info("Added 'payout' column to bets table")
-        
-        if 'prediction' not in existing_columns:
-            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN prediction TEXT"))
-            logger.info("Added 'prediction' column to bets table")
-            
-        # products table
-conn.execute(sql_text('''
-    CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        name TEXT,
-        price INTEGER,  -- цена в кредитах
-        image TEXT,
-        description TEXT,
-        stock INTEGER DEFAULT 100
-    )
-'''))
-    
-# Проверяем и добавляем недостающие колонки в таблицу products
-existing_columns = [row[0] for row in conn.execute(sql_text("""
-    SELECT column_name 
-    FROM information_schema.columns 
-    WHERE table_name = 'products'
-"""))]
-
-if 'stock' not in existing_columns:
-    conn.execute(sql_text("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 100"))
-    logger.info("Added 'stock' column to products table")
-    
         # cart table
-    conn.execute(sql_text('''
+        conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS cart (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
@@ -236,8 +169,9 @@ if 'stock' not in existing_columns:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         '''))
+        
         # achievements table
-    conn.execute(sql_text('''
+        conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS achievements (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
@@ -245,8 +179,9 @@ if 'stock' not in existing_columns:
                 achieved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         '''))
+        
         # referrals table
-    conn.execute(sql_text('''
+        conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS referrals (
                 id SERIAL PRIMARY KEY,
                 referrer_id BIGINT,
@@ -254,6 +189,7 @@ if 'stock' not in existing_columns:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         '''))
+    
     logger.info("DB initialized")
 
 init_db()
