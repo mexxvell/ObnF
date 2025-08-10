@@ -183,6 +183,26 @@ def init_db():
                 payout INTEGER DEFAULT 0
             )
         '''))
+        
+        # Проверяем и добавляем недостающие колонки в таблицу bets
+        existing_columns = [row[0] for row in conn.execute(sql_text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'bets'
+        """))]
+        
+        if 'status' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN status TEXT DEFAULT 'active'"))
+            logger.info("Added 'status' column to bets table")
+        
+        if 'payout' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN payout INTEGER DEFAULT 0"))
+            logger.info("Added 'payout' column to bets table")
+        
+        if 'prediction' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE bets ADD COLUMN prediction TEXT"))
+            logger.info("Added 'prediction' column to bets table")
+            
         # products table
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS products (
@@ -1182,6 +1202,12 @@ def current_online_counts():
 def get_user_stats(user_id):
     """Возвращает статистику пользователя по ставкам"""
     with engine.connect() as conn:
+        # Проверяем наличие колонки status
+        has_status_column = conn.execute(sql_text("""
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'bets' AND column_name = 'status'
+        """)).scalar()
+        
         # Общая статистика
         total_bets = conn.execute(sql_text("""
             SELECT COUNT(*) FROM bets WHERE user_id = :user_id
@@ -1189,19 +1215,28 @@ def get_user_stats(user_id):
             "user_id": user_id
         }).scalar()
         
-        won_bets = conn.execute(sql_text("""
-            SELECT COUNT(*) FROM bets 
-            WHERE user_id = :user_id AND status = 'won'
-        """), {
-            "user_id": user_id
-        }).scalar()
+        won_bets = 0
+        lost_bets = 0
         
-        lost_bets = conn.execute(sql_text("""
-            SELECT COUNT(*) FROM bets 
-            WHERE user_id = :user_id AND status = 'lost'
-        """), {
-            "user_id": user_id
-        }).scalar()
+        if has_status_column:
+            won_bets = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM bets 
+                WHERE user_id = :user_id AND status = 'won'
+            """), {
+                "user_id": user_id
+            }).scalar()
+            
+            lost_bets = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM bets 
+                WHERE user_id = :user_id AND status = 'lost'
+            """), {
+                "user_id": user_id
+            }).scalar()
+        else:
+            # Для совместимости со старыми данными без колонки status
+            # Предполагаем, что все ставки активны
+            won_bets = 0
+            lost_bets = 0
         
         # Средний коэффициент
         avg_odds = conn.execute(sql_text("""
@@ -1384,41 +1419,27 @@ def get_recent_bets():
     } for r in rows]
 
 def get_matches(round_number=None):
-    """Возвращает матчи"""
-    with engine.connect() as conn:
-        if round_number:
-            rows = conn.execute(sql_text("""
-                SELECT * FROM matches 
-                WHERE round = :r 
-                ORDER BY datetime
-            """), {"r": round_number}).fetchall()
-        else:
-            rows = conn.execute(sql_text("""
-                SELECT * FROM matches 
-                ORDER BY datetime
-            """)).fetchall()
-    return rows
+    """Возвращает матчи из Google Sheets"""
+    matches = get_matches_from_sheets()
+    
+    if round_number:
+        return [m for m in matches if m["round"] == round_number]
+    return matches
 
 def get_upcoming_matches():
-    """Возвращает предстоящие матчи"""
-    with engine.connect() as conn:
-        rows = conn.execute(sql_text("""
-            SELECT * FROM matches 
-            WHERE status = 'scheduled' AND datetime > NOW()
-            ORDER BY datetime
-            LIMIT 10
-        """)).fetchall()
-    return rows
+    """Возвращает предстоящие матчи из Google Sheets"""
+    matches = get_matches_from_sheets()
+    now = datetime.now()
+    upcoming = [m for m in matches if m["datetime"] > now]
+    return upcoming[:10]  # Возвращаем первые 10 матчей
 
 def get_live_matches():
-    """Возвращает текущие матчи"""
-    with engine.connect() as conn:
-        rows = conn.execute(sql_text("""
-            SELECT * FROM matches 
-            WHERE status = 'live'
-            ORDER BY datetime
-        """)).fetchall()
-    return rows
+    """Возвращает текущие матчи из Google Sheets"""
+    matches = get_matches_from_sheets()
+    now = datetime.now()
+    # Для демонстрации считаем, что матч "живой", если он начался в течение последнего часа
+    live_matches = [m for m in matches if m["datetime"] <= now <= m["datetime"] + timedelta(hours=2)]
+    return live_matches
 
 def get_match(match_id):
     """Возвращает матч по ID"""
@@ -1832,37 +1853,112 @@ def sync_orders_to_sheets():
     except Exception as e:
         logger.error("Orders sync err: %s", e)
 
+# Кэш для матчей из Google Sheets
+MATCHES_CACHE = {
+    'data': None,
+    'last_updated': None,
+    'cache_ttl': timedelta(minutes=5)  # Время жизни кэша - 5 минут
+}
+
+def get_matches_from_sheets():
+    """Получает матчи из Google Sheets со вкладки 'РАСПИСАНИЕ ИГР' с кэшированием"""
+    global MATCHES_CACHE
+    
+    # Проверяем, не нужно ли обновить кэш
+    now = datetime.now(timezone.utc)
+    if MATCHES_CACHE['data'] is not None and MATCHES_CACHE['last_updated'] is not None:
+        if now - MATCHES_CACHE['last_updated'] < MATCHES_CACHE['cache_ttl']:
+            return MATCHES_CACHE['data']
+    
+    # Если кэш устарел или пуст, получаем данные из Google Sheets
+    if not gs_client or not sheet:
+        if MATCHES_CACHE['data'] is not None:
+            return MATCHES_CACHE['data']  # Возвращаем старые данные, если нет доступа к Sheets
+        return []
+    
+    try:
+        ws = sheet.worksheet("РАСПИСАНИЕ ИГР")
+        data = ws.get_all_values()
+        
+        # Пропускаем заголовки (первую строку)
+        matches = []
+        current_round = None
+        round_number = 1
+        
+        for row in data[1:]:
+            # Если в ячейке A1:E1 это название тура (например, "1 ТУР")
+            if len(row) > 0 and "ТУР" in row[0].upper():
+                current_round = row[0]
+                round_number = int(row[0].split()[0]) if row[0].split()[0].isdigit() else round_number + 1
+                continue
+            
+            # Пропускаем пустые строки
+            if not row or not any(row):
+                continue
+            
+            # Проверяем, что строка содержит достаточно данных
+            if len(row) < 7:  # Должно быть как минимум 7 столбцов (A-G)
+                continue
+            
+            # Извлекаем данные
+            team1 = row[0].strip() if row[0] else ""
+            team2 = row[4].strip() if len(row) > 4 and row[4] else ""
+            date_str = row[5].strip() if len(row) > 5 and row[5] else ""
+            time_str = row[6].strip() if len(row) > 6 and row[6] else ""
+            
+            # Пропускаем строки без команд или даты
+            if not team1 or not team2 or not date_str:
+                continue
+            
+            # Формируем дату и время
+            try:
+                # Формат даты в Google Sheets: "08.08.25"
+                # Преобразуем в формат "YYYY-MM-DD"
+                day, month, year = date_str.split('.')
+                year = "20" + year if len(year) == 2 else year
+                date_time_str = f"{year}-{month}-{day}"
+                
+                if time_str:
+                    date_time_str += f" {time_str}"
+                
+                # Создаем объект datetime
+                match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M") if time_str else datetime.strptime(date_time_str, "%Y-%m-%d")
+            except (ValueError, IndexError):
+                continue
+            
+            # Добавляем матч
+            matches.append({
+                "id": len(matches) + 1,
+                "round": round_number,
+                "team1": team1,
+                "team2": team2,
+                "score1": 0,
+                "score2": 0,
+                "datetime": match_datetime,
+                "status": "scheduled" if match_datetime > datetime.now(timezone.utc) else "finished",
+                "odds_team1": 35,
+                "odds_team2": 65,
+                "odds_draw": 0
+            })
+        
+        # Сортируем матчи по дате
+        matches.sort(key=lambda x: x["datetime"])
+        
+        # Обновляем кэш
+        MATCHES_CACHE['data'] = matches
+        MATCHES_CACHE['last_updated'] = now
+        
+        return matches
+    except Exception as e:
+        logger.error(f"Ошибка при получении матчей из Google Sheets: {e}")
+        if MATCHES_CACHE['data'] is not None:
+            return MATCHES_CACHE['data']  # Возвращаем старые данные при ошибке
+        return []
+
 # --- Test data generator (if no matches) ---
 def generate_test_matches():
-    """Генерирует тестовые матчи"""
-    with engine.begin() as conn:
-        cnt = conn.execute(sql_text("SELECT COUNT(*) FROM matches")).scalar()
-        if cnt == 0:
-            teams = [
-                ("Динамо", "Спартак"),
-                ("Торпедо", "Зенит"),
-                ("Локомотив", "Челси"),
-                ("Динамо", "Зенит")
-            ]
-            now = datetime.now(timezone.utc)
-            
-            for i, pair in enumerate(teams, start=1):
-                conn.execute(sql_text("""
-                    INSERT INTO matches (
-                        round, team1, team2, datetime, 
-                        stream_url, odds_team1, odds_team2
-                    ) VALUES (
-                        :r, :a, :b, :dt, 
-                        :url, 35, 65
-                    )
-                """), {
-                    "r": i,
-                    "a": pair[0],
-                    "b": pair[1],
-                    "dt": now + timedelta(days=i),
-                    "url": "https://vk.com/video-228230953_456239027"  # Пример ссылки на VK
-                })
-            logger.info("Inserted test matches")
+    """Удаляет тестовые матчи, так как мы используем Google Sheets"""
+    pass
 
 generate_test_matches()
 
