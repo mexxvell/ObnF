@@ -434,21 +434,33 @@ def miniapp_predictions():
 def miniapp_profile():
     user_id = session.get('user_id', 0)
     if not user_id:
+        logger.warning("Попытка доступа к профилю без user_id в сессии")
         return "Not authorized", 403
     
-    user = get_user(user_id)
-    stats = get_user_stats(user_id)
-    achievements = get_user_achievements(user_id)
+    logger.info(f"Запрос профиля для user_id={user_id}")
     
-    # Формируем реферальную ссылку
-    referral_link = f"{MINIAPP_URL}?ref={user_id}"
-    
-    return render_template('profile.html', 
-                          user=user, 
-                          stats=stats, 
-                          achievements=achievements,
-                          user_id=user_id,
-                          referral_link=referral_link)
+    try:
+        user = get_user(user_id)
+        if not user:
+            logger.warning(f"Пользователь с user_id={user_id} не найден")
+            return "User not found", 404
+        
+        stats = get_user_stats(user_id)
+        achievements = get_user_achievements(user_id)
+        
+        # Формируем реферальную ссылку
+        referral_link = f"{MINIAPP_URL}?ref={user_id}"
+        
+        logger.info(f"Профиль для user_id={user_id} успешно загружен")
+        return render_template('profile.html', 
+                              user=user, 
+                              stats=stats, 
+                              achievements=achievements,
+                              user_id=user_id,
+                              referral_link=referral_link)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке профиля для user_id={user_id}: {str(e)}", exc_info=True)
+        return "Internal server error", 500
 
 @app.route('/miniapp/profile_api')
 def miniapp_profile_api():
@@ -909,6 +921,10 @@ def ensure_user_exists(user_id, username=None, display_name=None, referrer=None)
 def get_user(user_id):
     with engine.connect() as conn:
         row = conn.execute(sql_text("SELECT * FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        if row:
+            logger.debug(f"Найден пользователь: id={row.id}, username={row.username}")
+        else:
+            logger.warning(f"Пользователь с id={user_id} не найден в базе данных")
     return row
 
 def check_daily_streak(user_id):

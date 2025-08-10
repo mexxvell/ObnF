@@ -130,35 +130,35 @@
     }
     
     // Обработчик кликов по ссылкам
-    function setupLinkHandlers() {
+	function setupLinkHandlers() {
     document.addEventListener('click', (e) => {
         let target = e.target;
         while (target && !target.href) {
             target = target.parentElement;
         }
         
-        if (target && target.href) {
-            // Проверяем, что это внутренняя ссылка
-            if (target.href.includes(window.location.host) && !target.target) {
-                e.preventDefault();
-                const frame = document.getElementById('page-frame');
-                if (frame) {
-                    frame.src = target.href;
-                    
-                    // Обновляем историю браузера
-                    if (!target.href.includes('#')) {
-                        window.history.pushState({}, '', target.href);
-                    }
-                    
-                    // Закрываем боковое меню при переходе
-                    document.getElementById('side-menu').classList.add('hidden');
+        // Проверяем, что это внутренняя ссылка
+        if (target && target.href && target.href.includes(window.location.host)) {
+            e.preventDefault();
+            
+            // Открываем ссылку в iframe
+            const frame = document.getElementById('page-frame');
+            if (frame) {
+                frame.src = target.href;
+                
+                // Обновляем историю браузера
+                if (!target.href.includes('#')) {
+                    window.history.pushState({}, '', target.href);
                 }
+                
+                // Закрываем боковое меню при переходе
+                document.getElementById('side-menu').classList.add('hidden');
             }
-            // Для внешних ссылок открываем в том же окне
-            else if (!target.target) {
-                e.preventDefault();
-                window.location.href = target.href;
-            }
+        }
+        // Для внешних ссылок открываем в том же окне
+        else if (target && target.href && !target.target) {
+            e.preventDefault();
+            window.location.href = target.href;
         }
     });
 }
