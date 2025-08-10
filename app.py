@@ -204,16 +204,28 @@ def init_db():
             logger.info("Added 'prediction' column to bets table")
             
         # products table
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                name TEXT,
-                price INTEGER,  -- цена в кредитах
-                image TEXT,
-                description TEXT,
-                stock INTEGER DEFAULT 100
-            )
-        '''))
+conn.execute(sql_text('''
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name TEXT,
+        price INTEGER,  -- цена в кредитах
+        image TEXT,
+        description TEXT,
+        stock INTEGER DEFAULT 100
+    )
+'''))
+    
+# Проверяем и добавляем недостающие колонки в таблицу products
+existing_columns = [row[0] for row in conn.execute(sql_text("""
+    SELECT column_name 
+    FROM information_schema.columns 
+    WHERE table_name = 'products'
+"""))]
+
+if 'stock' not in existing_columns:
+    conn.execute(sql_text("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 100"))
+    logger.info("Added 'stock' column to products table")
+    
         # cart table
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS cart (
@@ -1547,11 +1559,28 @@ def calculate_odds(match):
             'draw': 2.0
         }
     
+    # Убедимся, что все коэффициенты положительные
+    odds_team1 = max(match.odds_team1, 1)
+    odds_team2 = max(match.odds_team2, 1)
+    odds_draw = max(match.odds_draw, 1)
+    
+    # Рассчитываем вероятности
+    prob_team1 = odds_team1 / 100.0
+    prob_team2 = odds_team2 / 100.0
+    prob_draw = odds_draw / 100.0
+    total_prob = prob_team1 + prob_team2 + prob_draw
+    
+    # Нормализуем вероятности
+    norm_team1 = prob_team1 / total_prob
+    norm_team2 = prob_team2 / total_prob
+    norm_draw = prob_draw / total_prob
+    
+    # Рассчитываем коэффициенты с маржей
     k_factor = 1.05  # Маржа 5%
     return {
-        'team1': round((100 / match.odds_team1) * k_factor, 2) if match.odds_team1 > 0 else 0,
-        'team2': round((100 / match.odds_team2) * k_factor, 2) if match.odds_team2 > 0 else 0,
-        'draw': round((100 / match.odds_draw) * k_factor, 2) if match.odds_draw > 0 else 0
+        'team1': round(1 / norm_team1 * k_factor, 2),
+        'team2': round(1 / norm_team2 * k_factor, 2),
+        'draw': round(1 / norm_draw * k_factor, 2) if norm_draw > 0 else 0
     }
 
 def process_bets_for_match(match_id, score1, score2):
@@ -2143,6 +2172,45 @@ def inject_now():
         'league_logo': 'images/league-logo.png'
     }
 
+# Добавляем обработчики для несуществующих маршрутов
+@app.route('/miniapp/matches')
+def miniapp_matches():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return "Not authorized", 403
+    
+    rounds = []
+    for r in range(1, 4):
+        matches = get_matches(r)
+        rounds.append({"number": r, "matches": matches})
+    
+    return render_template('home.html', rounds=rounds, user_id=user_id, owner_id=OWNER_ID)
+
+@app.route('/miniapp/notifications')
+def miniapp_notifications():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 403
+    
+    notifications = get_unseen_notifications(user_id)
+    return jsonify([{
+        "id": n.id,
+        "team1": n.team1,
+        "team2": n.team2,
+        "score1": n.score1,
+        "score2": n.score2,
+        "event": n.event,
+        "created_at": str(n.created_at)
+    } for n in notifications])
+
+@app.route('/miniapp/support')
+def miniapp_support():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return "Not authorized", 403
+    
+    return render_template('support.html', user_id=user_id, owner_id=OWNER_ID)
+    
 # --- Run ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))

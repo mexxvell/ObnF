@@ -95,7 +95,28 @@ function setupBetFormHandler() {
             
             const amount = parseInt(amountInput.value);
             const betType = activeBetTypeBtn.dataset.type;
-            const prediction = predictionInput.style.display === 'block' ? predictionInput.value : '';
+            let prediction = '';
+            
+            if (betType === 'total_goals' || betType === 'penalty' || betType === 'red_card') {
+                prediction = predictionInput.value.trim();
+                
+                // Валидация для ставки на тотал голов
+                if (betType === 'total_goals' && prediction) {
+                    const total = parseFloat(prediction);
+                    if (isNaN(total) || total < 0) {
+                        showNotification('Введите корректное количество голов', 'error');
+                        return;
+                    }
+                }
+                
+                // Валидация для ставки на пенальти и удаление
+                if ((betType === 'penalty' || betType === 'red_card') && prediction) {
+                    if (prediction.toLowerCase() !== 'да' && prediction.toLowerCase() !== 'нет') {
+                        showNotification('Введите "да" или "нет"', 'error');
+                        return;
+                    }
+                }
+            }
             
             // Валидация
             if (!amount || amount < 10) {
@@ -127,8 +148,7 @@ function setupBetFormHandler() {
                     // Обновляем баланс
                     const balanceElement = document.querySelector('.user-balance');
                     if (balanceElement) {
-                        const currentBalance = parseInt(balanceElement.textContent);
-                        balanceElement.textContent = `${currentBalance - amount} кредитов`;
+                        balanceElement.textContent = `${data.new_balance} кредитов`;
                     }
                 } else {
                     showNotification(data.error || 'Ошибка при создании ставки', 'error');

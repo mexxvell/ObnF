@@ -26,16 +26,16 @@
                     
                             <div class="teams">
                         <div class="team team1">
-                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '') + '.png') }}" 
+                            <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '') ~ '.png') }}" 
      onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
      alt="{{ match.team1 }}">
                             <span>{{ match.team1 }}</span>
                         </div>
                         <div class="vs">{{ match.score1 }} : {{ match.score2 }}</div>
                         <div class="team team2">
-                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team2|replace(' ', '').replace('.', '').lower() + '.png') }}" 
-                                 onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
-                                 alt="{{ match.team2 }}">
+                            <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team2|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '') ~ '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team2 }}">
                             <span>{{ match.team2 }}</span>
                         </div>
                     </div>

@@ -26,14 +26,20 @@
         <h3>Ежедневный чекин</h3>
         <div class="streak-container">
             <div class="streak-days">
-                {% for day in range(1, 8) %}
-                <div class="streak-day {% if day <= user.streak %}active{% endif %}">
-                    <span class="day-number">{{ day }}</span>
-                    <span class="day-reward">{{ [10, 20, 30, 40, 50, 60, 500][day-1] }}</span>
-                </div>
-                {% endfor %}
+            {% set days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] %}
+            {% set rewards = [10, 20, 30, 40, 50, 60, 500] %}
+            
+            {% for i in range(0, 7) %}
+            <div class="streak-day {% if i < user.streak %}active{% endif %}">
+                <div class="day-name">{{ days[i] }}</div>
+                <div class="day-reward">{{ rewards[i] }}</div>
+                {% if i < user.streak %}
+                <div class="checkmark">✓</div>
+                {% endif %}
             </div>
-            <button id="daily-checkin-btn" class="btn">Получить бонус</button>
+            {% endfor %}
+        </div>
+        <button id="daily-checkin-btn" class="btn">Получить бонус</button>
         </div>
     </div>
     
