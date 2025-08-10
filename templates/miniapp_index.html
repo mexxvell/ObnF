@@ -4,7 +4,14 @@
     <div class="loading-logo">
         <img src="{{ url_for('static', filename='images/league-logo.png') }}" alt="Логотип Лиги">
         <div class="loading-text">Загрузка приложения</div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar" id="loading-progress-bar"></div>
+        </div>
     </div>
+</div>
+
+<div id="app-container" class="app-container hidden">
+    <!-- Остальной контент -->
 </div>
 
 <div id="app-container" class="app-container hidden">

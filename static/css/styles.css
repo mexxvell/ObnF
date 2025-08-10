@@ -1348,38 +1348,11 @@ table tr:last-child td {
     align-items: center;
     z-index: 10000;
     transition: opacity 0.5s ease;
+    opacity: 1;
 }
 
 .loading-logo {
     text-align: center;
-}
-
-.loading-logo img {
-    width: 120px;
-    height: 120px;
-    animation: pulse 2s infinite;
-}
-
-.loading-text {
-    color: var(--text);
-    font-size: 18px;
-    margin-top: 20px;
-    opacity: 0.8;
-}
-
-.app-container {
-    width: 100%;
-    height: 100%;
-}
-
-.app-container.hidden {
-    display: none;
-}
-
-@keyframes logo-pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.08); }
-    100% { transform: scale(1); }
 }
 
 .loading-logo img {
@@ -1390,6 +1363,38 @@ table tr:last-child td {
     object-fit: contain;
     padding: 10px;
     background-color: rgba(100, 255, 218, 0.1);
+}
+
+.loading-text {
+    color: var(--text);
+    font-size: 18px;
+    margin-top: 20px;
+    opacity: 0.8;
+}
+
+@keyframes logo-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+}
+
+/* Индикатор прогресса загрузки */
+.loading-progress {
+    width: 80%;
+    max-width: 300px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 20px;
+    overflow: hidden;
+}
+
+.loading-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.3s ease;
+}
 }
 .streak-day {
     position: relative;
@@ -1509,4 +1514,17 @@ table tr:last-child td {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(100, 255, 218, 0.2);
+}
+
+/* Скрываем iframe до инициализации */
+.page-frame {
+    display: none;
+    width: 100%;
+    height: calc(100vh - 100px);
+    border: none;
+}
+
+/* Показываем iframe после инициализации */
+.page-frame.ready {
+    display: block;
 }

@@ -304,34 +304,41 @@ async function initSession() {
     }
     
 document.addEventListener('DOMContentLoaded', () => {
-    // Скрываем основной контент до завершения инициализации
-    const appContainer = document.getElementById('app-container');
+    // Элементы интерфейса
     const loadingScreen = document.getElementById('loading-screen');
+    const appContainer = document.getElementById('app-container');
     const frame = document.getElementById('page-frame');
     
+    // Скрываем основной контент до завершения инициализации
     if (frame) {
-        frame.style.display = 'none'; // Скрываем iframe
+        frame.style.display = 'none';
     }
     
-    // Сначала инициализируем сессию
-    initSession()
-        .then(() => {
-            // После успешной инициализации показываем приложение
-            if (loadingScreen) {
-                loadingScreen.style.opacity = '0';
-                setTimeout(() => {
-                    if (loadingScreen) {
-                        loadingScreen.style.display = 'none';
-                    }
-                    if (appContainer) {
-                        appContainer.classList.remove('hidden');
-                    }
-                    if (frame) {
-                        frame.style.display = 'block';
-                    }
-                }, 500);
-            }
-            
+    // Таймаут для инициализации (максимум 10 секунд)
+    const INIT_TIMEOUT = 10000;
+    let initTimeoutId;
+    
+    // Функция завершения инициализации
+    const completeInitialization = (success = true) => {
+        clearTimeout(initTimeoutId);
+        
+        // Плавно скрываем экран загрузки
+        if (loadingScreen) {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => {
+                if (loadingScreen) {
+                    loadingScreen.style.display = 'none';
+                }
+                if (appContainer) {
+                    appContainer.classList.remove('hidden');
+                }
+                if (frame && success) {
+                    frame.style.display = 'block';
+                }
+            }, 500);
+        }
+        
+        if (success) {
             // Настраиваем интерфейс
             setupBottomMenu();
             setupSideMenu();
@@ -350,24 +357,121 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Загружаем содержимое активной вкладки
             loadActiveTabContent(activeTab);
-        })
-        .catch(error => {
-            console.error('Critical error during session initialization:', error);
-            showNotification('Ошибка инициализации сессии. Пожалуйста, перезагрузите приложение.', 'error');
+        } else {
+            // Показываем уведомление об ошибке
+            showNotification('Не удалось инициализировать приложение. Проверьте соединение и перезагрузите страницу.', 'error');
             
-            // Показываем приложение даже при ошибке, но с уведомлением
-            if (loadingScreen) {
-                loadingScreen.style.opacity = '0';
-                setTimeout(() => {
-                    if (loadingScreen) {
-                        loadingScreen.style.display = 'none';
-                    }
-                    if (appContainer) {
-                        appContainer.classList.remove('hidden');
-                    }
-                }, 500);
+            // Все равно показываем приложение, чтобы пользователь мог перезагрузить
+            if (appContainer) {
+                appContainer.classList.remove('hidden');
             }
+            
+            // Показываем сообщение об ошибке в основном контенте
+            if (frame) {
+                frame.style.display = 'block';
+                frame.src = 'about:blank';
+                frame.onload = function() {
+                    const errorContent = `
+                        <div style="padding: 20px; text-align: center; color: #ff6b6b;">
+                            <h2>Ошибка инициализации</h2>
+                            <p>Не удалось загрузить приложение. Пожалуйста, перезагрузите страницу.</p>
+                            <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                Перезагрузить
+                            </button>
+                        </div>
+                    `;
+                    frame.contentDocument.open();
+                    frame.contentDocument.write(errorContent);
+                    frame.contentDocument.close();
+                };
+            }
+        }
+    };
+    
+    // Проверяем, доступен ли Telegram WebApp API
+    const checkTelegramApi = () => {
+        return new Promise((resolve) => {
+            const maxAttempts = 20;
+            let attempts = 0;
+            
+            const check = () => {
+                attempts++;
+                if (window.Telegram && window.Telegram.WebApp) {
+                    console.log('Telegram WebApp API загружен');
+                    resolve(true);
+                } else if (attempts >= maxAttempts) {
+                    console.warn('Telegram WebApp API не загрузился');
+                    resolve(false);
+                } else {
+                    setTimeout(check, 100);
+                }
+            };
+            
+            check();
         });
+    };
+    
+    // Инициализация сессии с проверкой Telegram API
+    const initSessionWithCheck = async () => {
+        // Сначала проверяем доступность Telegram API
+        const isTelegramAvailable = await checkTelegramApi();
+        
+        if (!isTelegramAvailable) {
+            throw new Error('Telegram WebApp API недоступен');
+        }
+        
+        try {
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+            tg.ready();
+            
+            const user = tg.initDataUnsafe?.user || null;
+            if (!user) {
+                console.error("User data not available from Telegram");
+                throw new Error("User data not available");
+            }
+            
+            // Сохраняем реферальный параметр
+            const urlParams = new URLSearchParams(window.location.search);
+            const ref = urlParams.get('ref');
+            
+            // Отправляем данные на сервер
+            const payload = {
+                user_id: user.id,
+                username: user.username || "",
+                display_name: `${user.first_name} ${user.last_name || ""}`,
+                ref: ref
+            };
+            
+            const response = await fetch('/miniapp/init', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Server responded with status ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                console.log('Session initialized');
+                // Обновляем информацию о пользователе
+                const userMini = document.getElementById('user-mini');
+                if (userMini) {
+                    userMini.textContent = user.first_name || 'Пользователь';
+                }
+                return true;
+            } else {
+                throw new Error(data.error || 'Session initialization failed');
+            }
+        } catch (error) {
+            console.error('Error initializing session:', error);
+            throw error;
+        }
+    };
     
     // Добавляем функцию для загрузки содержимого вкладки
     function loadActiveTabContent(tabName) {
@@ -393,7 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 frame.src = '/miniapp/home';
         }
         
-        // Добавляем небольшую задержку перед показом, чтобы дать время на загрузку
+        // Добавляем небольшую задержку перед показом
         setTimeout(() => {
             if (frame) {
                 frame.style.opacity = '1';
@@ -402,10 +506,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 300);
     }
     
+    // Устанавливаем таймаут для инициализации
+    initTimeoutId = setTimeout(() => {
+        console.error('Инициализация сессии превысила лимит времени');
+        completeInitialization(false);
+    }, INIT_TIMEOUT);
+    
+	// Обновление прогресс-бара
+const progressBar = document.getElementById('loading-progress-bar');
+let progress = 0;
+
+const updateProgress = (value) => {
+    progress = Math.min(Math.max(progress, value), 100);
+    if (progressBar) {
+        progressBar.style.width = `${progress}%`;
+    }
+};
+
+// Имитация прогресса загрузки
+const progressInterval = setInterval(() => {
+    if (progress < 90) {
+        updateProgress(progress + 2);
+    }
+}, 300);
+
+// Остановка прогресса при завершении инициализации
+const completeInitialization = (success = true) => {
+    clearTimeout(initTimeoutId);
+    clearInterval(progressInterval);
+    updateProgress(100);
+    
+};
+    // Запускаем инициализацию
+    initSessionWithCheck()
+        .then(() => {
+            console.log('Инициализация сессии завершена успешно');
+            completeInitialization(true);
+        })
+        .catch(error => {
+            console.error('Ошибка инициализации сессии:', error);
+            completeInitialization(false);
+        });
+    
     // Очистка при разгрузке
     window.addEventListener('beforeunload', () => {
         if (pollInterval) {
             clearInterval(pollInterval);
         }
+        clearTimeout(initTimeoutId);
     });
 });
