@@ -1,47 +1,8 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ title or "Лига" }}</title>
-  <link rel="stylesheet" href="/static/css/styles.css">
-  <link rel="stylesheet" href="/static/css/animations.css">
-  <link rel="stylesheet" href="/static/css/notifications.css">
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-</head>
-<body>
-  
-  <!-- Бургер-меню -->
-  <nav class="burger-menu">
-    <ul>
-      <li><a href="/miniapp/home">🏠 Главная</a></li>
-      <li><a href="/miniapp/standings">📊 Турнирная таблица</a></li>
-      <li><a href="/miniapp/nlo88">🛸 НЛО 8х8</a></li>
-      <li><a href="/miniapp/predictions">📈 Прогнозы</a></li>
-      <li><a href="/miniapp/profile">👤 Профиль</a></li>
-      <li><a href="/miniapp/support">📢 Поддержка</a></li>
-      {% if session.get('user_id') == OWNER_ID %}
-      <li><a href="/miniapp/admin">⚙️ Админ</a></li>
-      {% endif %}
-    </ul>
-  </nav>
-
-  <div id="app">
-    {% block content %}{% endblock %}
-  </div>
-
-  <!-- Нижнее меню -->
-  <footer class="bottom-nav">
-    <a href="/miniapp/home">🏠</a>
-    <a href="/miniapp/standings">📊</a>
-    <a href="/miniapp/predictions">📈</a>
-    <a href="/miniapp/profile">👤</a>
-  </footer>
-
-  <script>
-    // expose OWNER_ID to front-end
-    window.OWNER_ID = {{ OWNER_ID|tojson }};
-  </script>
-  <script src="/static/js/miniapp.js"></script>
-</body>
-</html>
+<!-- templates/layout_base.html -->
+<nav class="bottom-menu">
+  <button data-tab="home" class="tab-btn active">Главная</button>
+  <button data-tab="tournaments" class="tab-btn">Турниры</button>
+  <button data-tab="nft" class="tab-btn">NFT</button>
+  <button data-tab="profile" class="tab-btn">Профиль</button>
+  <button data-tab="support" class="tab-btn">Поддержка</button>
+</nav>

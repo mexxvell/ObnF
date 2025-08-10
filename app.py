@@ -14,12 +14,29 @@ from sqlalchemy import create_engine, text as sql_text
 import random
 
 # Optional: gspread for Google Sheets integration
-try:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-    GS_ENABLED = True
-except Exception:
-    GS_ENABLED = False
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Подключение к Google Sheets
+def connect_to_sheets():
+    try:
+        creds_dict = json.loads(os.getenv("GS_CREDS_JSON"))
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key("YOUR_SPREADSHEET_ID").worksheet("ТАБЛИЦА")
+        return sheet
+    except Exception as e:
+        logger.error(f"Google Sheets error: {e}")
+        return None
+
+# Получение данных
+def get_teams_from_sheet():
+    sheet = connect_to_sheets()
+    if not sheet:
+        return []
+    data = sheet.get_all_records()
+    return data
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
