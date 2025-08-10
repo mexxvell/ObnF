@@ -1239,6 +1239,90 @@ def get_user_stats(user_id):
             lost_bets = 0
         
         # Средний коэффициент
+        try:
+            avg_odds = conn.execute(sql_text("""
+                SELECT AVG(odds) FROM (
+                    SELECT 
+                        CASE 
+                            WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
+                            WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
+                            WHEN b.type = 'draw' THEN m.odds_draw / 100.0
+                            ELSE 1.0
+                        END as odds
+                    FROM bets b
+                    JOIN matches m ON b.match_id = m.id
+                    WHERE b.user_id = :user_id
+                ) as odds_table
+            """), {
+                "user_id": user_id
+            }).scalar() or 1.0
+        except Exception as e:
+            logger.error(f"Error calculating average odds: {e}")
+            avg_odds = 1.0
+        
+        # Топ-10 пользователей
+        try:
+            top_users = conn.execute(sql_text("""
+                SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
+                       SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) * 100.0 / COUNT(b.id) as win_percent,
+                       AVG(
+                           CASE 
+                               WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
+                               WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
+                               WHEN b.type = 'draw' THEN m.odds_draw / 100.0
+                               ELSE 1.0
+                           END
+                       ) as avg_odds
+                FROM users u
+                LEFT JOIN bets b ON u.id = b.user_id
+                LEFT JOIN matches m ON b.match_id = m.id
+                GROUP BY u.id
+                ORDER BY bet_count DESC, win_percent DESC, avg_odds DESC
+                LIMIT 10
+            """)).fetchall()
+        except Exception as e:
+            logger.error(f"Error getting top users: {e}")
+            top_users = []
+    
+    return {
+        "total_bets": total_bets,
+        "won_bets": won_bets,
+        "lost_bets": lost_bets,
+        "win_percent": round(won_bets / total_bets * 100, 1) if total_bets > 0 else 0,
+        "avg_odds": round(avg_odds, 2),
+        "top_users": [{
+            "id": u.id,
+            "display_name": u.display_name,
+            "bet_count": u.bet_count,
+            "win_percent": round(u.win_percent, 1) if u.win_percent else 0,
+            "avg_odds": round(u.avg_odds, 2) if u.avg_odds else 1.0
+        } for u in top_users]
+    }
+        
+        won_bets = 0
+        lost_bets = 0
+        
+        if has_status_column:
+            won_bets = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM bets 
+                WHERE user_id = :user_id AND status = 'won'
+            """), {
+                "user_id": user_id
+            }).scalar()
+            
+            lost_bets = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM bets 
+                WHERE user_id = :user_id AND status = 'lost'
+            """), {
+                "user_id": user_id
+            }).scalar()
+        else:
+            # Для совместимости со старыми данными без колонки status
+            # Предполагаем, что все ставки активны
+            won_bets = 0
+            lost_bets = 0
+        
+        # Средний коэффициент
         avg_odds = conn.execute(sql_text("""
             SELECT AVG(odds) FROM (
                 SELECT 
@@ -1921,10 +2005,17 @@ def get_matches_from_sheets():
                 if time_str:
                     date_time_str += f" {time_str}"
                 
-                # Создаем объект datetime
-                match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M") if time_str else datetime.strptime(date_time_str, "%Y-%m-%d")
+                    # Создаем объект datetime с временной зоной UTC
+                if time_str:
+                    match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                else:
+                    match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             except (ValueError, IndexError):
                 continue
+            
+            # Определяем статус матча с учетом временной зоны
+            current_time = datetime.now(timezone.utc)
+            status = "scheduled" if match_datetime > current_time else "finished"
             
             # Добавляем матч
             matches.append({
@@ -1955,12 +2046,74 @@ def get_matches_from_sheets():
             return MATCHES_CACHE['data']  # Возвращаем старые данные при ошибке
         return []
 
+def sync_matches_to_db():
+    """Синхронизирует матчи из Google Sheets с базой данных"""
+    if not gs_client or not sheet:
+        logger.warning("Google Sheets not configured; skipping match sync")
+        return
+    
+    try:
+        # Получаем матчи из Google Sheets
+        matches = get_matches_from_sheets()
+        
+        # Синхронизируем с базой данных
+        with engine.begin() as conn:
+            # Очищаем существующие матчи (или помечаем как архивные)
+            # Вместо удаления, можно пометить старые матчи как архивные
+            conn.execute(sql_text("DELETE FROM matches"))
+            
+            # Добавляем новые матчи
+            for match in matches:
+                conn.execute(sql_text("""
+                    INSERT INTO matches (
+                        round, team1, team2, score1, score2, datetime, status,
+                        odds_team1, odds_team2, odds_draw
+                    ) VALUES (
+                        :round, :team1, :team2, :score1, :score2, :datetime, :status,
+                        :odds_team1, :odds_team2, :odds_draw
+                    )
+                """), {
+                    "round": match["round"],
+                    "team1": match["team1"],
+                    "team2": match["team2"],
+                    "score1": match["score1"],
+                    "score2": match["score2"],
+                    "datetime": match["datetime"],
+                    "status": match["status"],
+                    "odds_team1": match["odds_team1"],
+                    "odds_team2": match["odds_team2"],
+                    "odds_draw": match["odds_draw"]
+                })
+        
+        logger.info(f"Synced {len(matches)} matches to database")
+    except Exception as e:
+        logger.error(f"Error syncing matches to database: {e}")
+        
 # --- Test data generator (if no matches) ---
 def generate_test_matches():
     """Удаляет тестовые матчи, так как мы используем Google Sheets"""
     pass
 
 generate_test_matches()
+
+# Синхронизируем матчи из Google Sheets с базой данных
+try:
+    sync_matches_to_db()
+except Exception as e:
+    logger.error(f"Error during initial match sync: {e}")
+
+# Запускаем периодическую синхронизацию
+def start_match_sync():
+    while True:
+        try:
+            sync_matches_to_db()
+        except Exception as e:
+            logger.error(f"Error in periodic match sync: {e}")
+        # Синхронизируем каждые 30 минут
+        time.sleep(1800)
+
+sync_thread = threading.Thread(target=start_match_sync, daemon=True)
+sync_thread.start()
 
 # --- Static helpers for rendering templates ---
 @app.context_processor
