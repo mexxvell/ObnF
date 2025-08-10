@@ -1,0 +1,85 @@
+/* Анимация появления уведомления */
+@keyframes slideIn {
+    from { top: -100px; }
+    to { top: 20px; }
+}
+
+.slide-in {
+    animation: slideIn 0.5s forwards;
+}
+
+/* Анимация скрытия уведомления */
+@keyframes slideOut {
+    from { top: 20px; }
+    to { top: -100px; }
+}
+
+.slide-out {
+    animation: slideOut 0.5s forwards;
+}
+
+/* Анимация переворота табло */
+@keyframes flip {
+    0% { transform: rotateX(0); }
+    50% { transform: rotateX(90deg); }
+    100% { transform: rotateX(0); }
+}
+
+.flip-animation {
+    animation: flip 0.8s ease-in-out;
+}
+
+/* Анимация перехода между страницами */
+.page-enter {
+    opacity: 0;
+    transform: translateY(20px);
+}
+
+.page-enter-active {
+    opacity: 1;
+    transform: translateY(0);
+    transition: all 0.3s ease;
+}
+
+.page-exit {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.page-exit-active {
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: all 0.3s ease;
+}
+/* Анимация переворота табло */
+@keyframes flip {
+    0% { transform: rotateX(0); }
+    50% { transform: rotateX(90deg); }
+    100% { transform: rotateX(0); }
+}
+
+.flip-animation {
+    animation: flip 0.8s ease-in-out;
+}
+
+/* Анимация появления админ-панели */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.admin-panel {
+    animation: pulse 2s ease-in-out;
+}
+
+/* Анимация кнопки подписки */
+@keyframes pulse-glow {
+    0% { box-shadow: 0 0 5px rgba(255, 107, 0, 0.5); }
+    50% { box-shadow: 0 0 20px rgba(255, 107, 0, 0.8); }
+    100% { box-shadow: 0 0 5px rgba(255, 107, 0, 0.5); }
+}
+
+.btn-subscribe {
+    animation: pulse-glow 2s infinite;
+}

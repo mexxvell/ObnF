@@ -1,0 +1,187 @@
+<div class="match-detail-container">
+ <!-- Админ-панель управления счётом -->
+    {% if user_id == OWNER_ID %}
+    <div class="admin-panel">
+        <h3>Администрирование счета</h3>
+        <div class="score-control">
+            <button class="btn-minus" data-team="1">-</button>
+            <input type="number" id="score1-input" value="{{ match.score1 }}" min="0">
+            <button class="btn-plus" data-team="1">+</button>
+            
+            <span>:</span>
+            
+            <button class="btn-minus" data-team="2">-</button>
+            <input type="number" id="score2-input" value="{{ match.score2 }}" min="0">
+            <button class="btn-plus" data-team="2">+</button>
+        </div>
+        <button id="update-score-btn" class="btn-admin">Обновить счет</button>
+    </div>
+    {% endif %}
+    
+    <!-- Подписка на матч -->
+    <div class="subscription-section">
+        {% if subscribed %}
+            <button id="unsubscribe-btn" class="btn-subscribe">🔔 Отписаться от уведомлений</button>
+        {% else %}
+            <button id="subscribe-btn" class="btn-subscribe">🔔 Подписаться на уведомления</button>
+        {% endif %}
+        <p>Получать уведомления о голевых моментах и изменении счета</p>
+    </div>
+	
+    <h1>⚽ Детали матча</h1>
+    
+    <div class="match-header">
+        <div class="teams">
+            <div class="team">
+                <img src="/static/img/{{ match.team1|lower }}.png" alt="{{ match.team1 }}" class="team-logo-large">
+                <span class="team-name">{{ match.team1 }}</span>
+            </div>
+            
+            <div class="score">
+                {{ match.score1 }}:{{ match.score2 }}
+            </div>
+            
+            <div class="team">
+                <img src="/static/img/{{ match.team2|lower }}.png" alt="{{ match.team2 }}" class="team-logo-large">
+                <span class="team-name">{{ match.team2 }}</span>
+            </div>
+        </div>
+        
+        <div class="match-info">
+            <span>Тур {{ match.round }}</span>
+            <span>{{ match.datetime.strftime('%d.%m.%Y %H:%M') }}</span>
+            {% if match.status == 'live' %}
+            <span class="live-badge">🔴 LIVE</span>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Форма команд -->
+    <div class="team-form">
+        <div class="form-item">
+            <h3>Форма {{ match.team1 }}:</h3>
+            <div class="form-badges">
+                {% for result in form1.split('/') %}
+                <span class="form-badge {{ result }}">{{ result }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="form-item">
+            <h3>Форма {{ match.team2 }}:</h3>
+            <div class="form-badges">
+                {% for result in form2.split('/') %}
+                <span class="form-badge {{ result }}">{{ result }}</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Трансляция -->
+    {% if match.status == 'live' %}
+    <div class="stream-container">
+        <h2>🔴 Прямая трансляция</h2>
+        <iframe 
+            src="{{ match.stream_url }}" 
+            width="100%" 
+            height="400px"
+            frameborder="0"
+            allowfullscreen>
+        </iframe>
+    </div>
+    {% endif %}
+    
+    <!-- Составы команд -->
+    <div class="squads-container">
+        <div class="squad">
+            <h3>{{ match.team1 }} - состав:</h3>
+            <ul class="player-list">
+                {% for player in players1 %}
+                <li>
+                    <span class="player-number">{{ player.number }}</span>
+                    <span class="player-name">{{ player.player }}</span>
+                    <span class="player-position">{{ player.position }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <div class="squad">
+            <h3>{{ match.team2 }} - состав:</h3>
+            <ul class="player-list">
+                {% for player in players2 %}
+                <li>
+                    <span class="player-number">{{ player.number }}</span>
+                    <span class="player-name">{{ player.player }}</span>
+                    <span class="player-position">{{ player.position }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Подписка/отписка
+    document.getElementById('subscribe-btn')?.addEventListener('click', () => {
+        fetch('/miniapp/subscribe/{{ match.id }}', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                }
+            });
+    });
+    
+    document.getElementById('unsubscribe-btn')?.addEventListener('click', () => {
+        fetch('/miniapp/unsubscribe/{{ match.id }}', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                }
+            });
+    });
+    
+    // Управление счётом (для администратора)
+    document.querySelectorAll('.btn-minus, .btn-plus').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const team = btn.dataset.team;
+            const input = document.getElementById(`score${team}-input`);
+            let value = parseInt(input.value) || 0;
+            
+            if (btn.classList.contains('btn-minus')) {
+                value = Math.max(0, value - 1);
+            } else {
+                value += 1;
+            }
+            
+            input.value = value;
+        });
+    });
+    
+    document.getElementById('update-score-btn')?.addEventListener('click', () => {
+        const score1 = document.getElementById('score1-input').value;
+        const score2 = document.getElementById('score2-input').value;
+        
+        fetch('/miniapp/update_score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                match_id: {{ match.id }},
+                score1: parseInt(score1),
+                score2: parseInt(score2)
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Счет успешно обновлен!');
+                // Обновляем счет на странице
+                document.querySelector('.score').textContent = `${score1}:${score2}`;
+            } else {
+                alert('Ошибка при обновлении счета');
+            }
+        });
+    });
+</script>

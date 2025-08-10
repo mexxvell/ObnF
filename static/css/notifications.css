@@ -1,0 +1,76 @@
+.notification-container {
+    position: fixed;
+    top: 20px;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.notification-banner {
+    background: rgba(10, 34, 64, 0.95);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    pointer-events: auto;
+    border: 2px solid #ff6b00;
+}
+
+.notification-banner .teams {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transform-style: preserve-3d;
+    perspective: 1000px;
+}
+
+.notification-banner .team-logo {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+}
+
+.notification-banner .score {
+    font-size: 1.5rem;
+    font-weight: bold;
+    min-width: 50px;
+    text-align: center;
+    background: rgba(255,255,255,0.1);
+    padding: 5px 10px;
+    border-radius: 5px;
+    transform-style: preserve-3d;
+}
+
+.notification-banner .event {
+    font-weight: bold;
+    font-size: 1.1rem;
+    color: #ffcc00;
+}
+
+.notification-banner button {
+    background: #ff6b00;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background 0.3s;
+}
+
+.notification-banner button:hover {
+    background: #e05a00;
+}
+
+.hidden {
+    display: none;
+}
+
+
+
