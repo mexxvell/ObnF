@@ -1,6 +1,6 @@
 Flask==2.3.2
 SQLAlchemy==1.4.47
-gspread==5.13.0
+gspread==5.7.2
 oauth2client==4.2.0
 pyTelegramBotAPI==4.10.0
 requests==2.31.0
