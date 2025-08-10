@@ -70,7 +70,7 @@
             </div>
             <div class="leaderboard-body">
                 {% for user in stats.top_users %}
-                <div class="leaderboard-row {% if user.id == current_user.id %}current-user{% endif %}">
+                <div class="leaderboard-row {% if user.id == user_id %}current-user{% endif %}">
                     <span class="position">{{ loop.index }}</span>
                     <span class="name">{{ user.display_name }}</span>
                     <span class="bets">{{ user.bet_count }}</span>

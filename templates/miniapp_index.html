@@ -33,7 +33,7 @@
             <li><a href="/miniapp/profile" target="page-frame">Профиль</a></li>
             <li><a href="/miniapp/shop" target="page-frame">Магазин</a></li>
             <li><a href="/miniapp/cart" target="page-frame">Корзина</a></li>
-            {% if current_user.id == owner_id %}
+                       {% if user_id == owner_id %}
             <li><a href="/miniapp/admin" target="page-frame">Админ</a></li>
             {% endif %}
             <li><a href="#" id="close-burger">Закрыть</a></li>

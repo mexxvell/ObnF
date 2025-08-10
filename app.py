@@ -292,7 +292,13 @@ def index():
 
 @app.route('/miniapp')
 def miniapp():
-    return render_template('miniapp_index.html', miniapp_url=MINIAPP_URL, owner_id=OWNER_ID)
+    # Получаем user_id из сессии
+    user_id = session.get('user_id', 0)
+    # Передаем user_id в шаблон
+    return render_template('miniapp_index.html', 
+                          miniapp_url=MINIAPP_URL, 
+                          owner_id=OWNER_ID,
+                          user_id=user_id)
 
 @app.route('/miniapp/init', methods=['POST'])
 def miniapp_init():
@@ -398,13 +404,15 @@ def miniapp_profile():
     stats = get_user_stats(user_id)
     achievements = get_user_achievements(user_id)
     
-    return render_template(
-        'profile.html', 
-        user=user, 
-        stats=stats, 
-        achievements=achievements,
-        user_id=user_id
-    )
+    # Формируем реферальную ссылку
+    referral_link = f"{MINIAPP_URL}?ref={user_id}"
+    
+    return render_template('profile.html', 
+                          user=user, 
+                          stats=stats, 
+                          achievements=achievements,
+                          user_id=user_id,
+                          referral_link=referral_link)
 
 @app.route('/miniapp/profile_api')
 def miniapp_profile_api():
