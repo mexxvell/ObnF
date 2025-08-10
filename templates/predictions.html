@@ -1,0 +1,37 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page predictions-page">
+  <h2>Прогнозы</h2>
+  <div class="matches-list">
+    {% for match in matches %}
+    <div class="match-card">
+      <h3>{{ match.team1 }} vs {{ match.team2 }}</h3>
+      <div class="odds">
+        <button data-type="team1" class="bet-btn">{{ match.odds.team1 }}</button>
+        <button data-type="draw" class="bet-btn">{{ match.odds.draw }}</button>
+        <button data-type="team2" class="bet-btn">{{ match.odds.team2 }}</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.bet-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const matchId = {{ match.id }};
+      const amount = prompt('Введите сумму ставки:');
+      if (!amount) return;
+      
+      await fetch('/miniapp/place_bet', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          match_id: matchId,
+          bet_type: btn.dataset.type,
+          amount: amount
+        })
+      });
+    });
+  });
+</script>
+{% endblock %}

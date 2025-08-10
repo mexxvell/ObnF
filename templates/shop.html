@@ -1,43 +1,16 @@
 {% extends "layout_base.html" %}
 {% block content %}
-<div class="page page-shop">
+<div class="page shop-page">
   <h2>Магазин</h2>
-
-  <div class="shop-items">
-    <div class="item">
-      <h4>Футболка</h4>
-      <p>Цена: 1500 ₽</p>
-      <button class="buy" data-item="Футболка" data-price="1500">Купить</button>
+  <div class="products-grid">
+    {% for product in products %}
+    <div class="product-card">
+      <img src="{{ url_for('static', filename='images/' ~ product.image) }}">
+      <h3>{{ product.name }}</h3>
+      <p>{{ product.price }} ₽</p>
+      <button>Купить</button>
     </div>
-    <div class="item">
-      <h4>Кепка</h4>
-      <p>Цена: 800 ₽</p>
-      <button class="buy" data-item="Кепка" data-price="800">Купить</button>
-    </div>
-    <div class="item">
-      <h4>Перчатки</h4>
-      <p>Цена: 1200 ₽</p>
-      <button class="buy" data-item="Перчатки" data-price="1200">Купить</button>
-    </div>
+    {% endfor %}
   </div>
 </div>
-
-<script>
-  document.addEventListener('DOMContentLoaded', ()=>{
-    document.querySelectorAll('.buy').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        const item = btn.dataset.item;
-        const price = btn.dataset.price;
-        const res = await fetch('/miniapp/create_order', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({item, price})
-        });
-        const j = await res.json();
-        if(j.success) alert('Заказ создан');
-        else alert('Ошибка');
-      });
-    });
-  });
-</script>
 {% endblock %}

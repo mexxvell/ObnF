@@ -94,7 +94,10 @@ def init_db():
                 datetime TIMESTAMP,
                 status TEXT DEFAULT 'scheduled', -- scheduled/live/finished
                 stream_url TEXT,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                odds_team1 INTEGER DEFAULT 35,
+                odds_team2 INTEGER DEFAULT 65,
+                odds_draw INTEGER DEFAULT 0
             )
         '''))
         # subscriptions
@@ -145,6 +148,37 @@ def init_db():
                 user_id BIGINT UNIQUE,
                 page TEXT,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # bets table for predictions
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS bets (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                match_id INTEGER,
+                type TEXT,  -- team1, team2, draw
+                amount INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        # products table for shop
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                name TEXT,
+                price INTEGER,
+                image TEXT,
+                description TEXT
+            )
+        '''))
+        # tournaments table
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS tournaments (
+                id SERIAL PRIMARY KEY,
+                name TEXT,
+                date_range TEXT,
+                participants INTEGER,
+                price INTEGER
             )
         '''))
     logger.info("DB initialized")
@@ -282,11 +316,16 @@ def miniapp_support():
 
 @app.route('/miniapp/nlo')
 def miniapp_nlo():
-    return "<h2>НЛО 8х8 — скоро здесь будет контент!</h2>"
+    return render_template('nlo.html')
 
 @app.route('/miniapp/predictions')
 def miniapp_predictions():
-    return "<h2>Прогнозы на матчи — скоро здесь будет контент!</h2>"
+    return render_template('predictions.html')
+
+@app.route('/miniapp/shop')
+def miniapp_shop():
+    products = get_products()
+    return render_template('shop.html', products=products)
 
 @app.route('/miniapp/home')
 def miniapp_home():
@@ -377,6 +416,122 @@ def miniapp_mark_seen(notif_id):
     if mark_notification_seen(notif_id):
         return jsonify({"success": True})
     return jsonify({"success": False}), 500
+
+@app.route('/miniapp/place_bet', methods=['POST'])
+def place_bet():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauth"}), 403
+    
+    data = request.json
+    match_id = data.get('match_id')
+    bet_type = data.get('bet_type')  # team1, team2, draw
+    amount = data.get('amount')
+    
+    if not match_id or not bet_type or not amount:
+        return jsonify({"error": "invalid data"}), 400
+    
+    # Проверка, что матч еще не начался
+    match = get_match(match_id)
+    if not match or match.status != 'scheduled':
+        return jsonify({"error": "match not available"}), 400
+    
+    # Проверка, что пользователь имеет достаточно средств
+    user = get_user(user_id)
+    if user.coins < amount:
+        return jsonify({"error": "insufficient funds"}), 400
+    
+    # Запись ставки
+    with engine.begin() as conn:
+        conn.execute(sql_text("""
+            INSERT INTO bets (user_id, match_id, type, amount)
+            VALUES (:user_id, :match_id, :bet_type, :amount)
+        """), {
+            "user_id": user_id,
+            "match_id": match_id,
+            "bet_type": bet_type,
+            "amount": amount
+        })
+        # Списание средств
+        conn.execute(sql_text("""
+            UPDATE users SET coins = coins - :amount WHERE id = :user_id
+        """), {
+            "amount": amount,
+            "user_id": user_id
+        })
+    
+    return jsonify({"success": True})
+
+@app.route('/miniapp/bets')
+def user_bets():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauth"}), 403
+    
+    bets = get_user_bets(user_id)
+    return jsonify(bets)
+
+@app.route('/miniapp/admin/bets')
+def admin_bets():
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return "Доступ запрещён", 403
+    
+    bets = get_all_bets()
+    return render_template('admin_bets.html', bets=bets)
+
+@app.route('/miniapp/admin/update_odds', methods=['POST'])
+def update_odds():
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return jsonify({"success": False, "error": "access denied"}), 403
+    
+    data = request.json
+    match_id = data.get('match_id')
+    odds_team1 = data.get('odds_team1')
+    odds_team2 = data.get('odds_team2')
+    odds_draw = data.get('odds_draw')
+    
+    if not match_id or odds_team1 is None or odds_team2 is None or odds_draw is None:
+        return jsonify({"error": "invalid data"}), 400
+    
+    with engine.begin() as conn:
+        conn.execute(sql_text("""
+            UPDATE matches 
+            SET odds_team1 = :odds_team1, 
+                odds_team2 = :odds_team2, 
+                odds_draw = :odds_draw 
+            WHERE id = :match_id
+        """), {
+            "odds_team1": odds_team1,
+            "odds_team2": odds_team2,
+            "odds_draw": odds_draw,
+            "match_id": match_id
+        })
+    
+    return jsonify({"success": True})
+
+@app.route('/miniapp/admin/set_match_result', methods=['POST'])
+def set_match_result():
+    user_id = session.get('user_id', 0)
+    if user_id != OWNER_ID:
+        return jsonify({"success": False, "error": "access denied"}), 403
+    
+    data = request.json
+    match_id = data.get('match_id')
+    score1 = data.get('score1')
+    score2 = data.get('score2')
+    
+    if not match_id or score1 is None or score2 is None:
+        return jsonify({"error": "invalid data"}), 400
+    
+    # Обновление счета матча
+    update_match_score(match_id, score1, score2)
+    
+    # Закрытие ставок и расчет выигрышей
+    process_bets_for_match(match_id, score1, score2)
+    
+    return jsonify({"success": True})
 
 # --- Admin panel (miniapp visible only if session user == owner) ---
 @app.route('/miniapp/admin')
@@ -499,6 +654,133 @@ def current_online_counts():
         week = conn.execute(sql_text("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '7 days'")).scalar()
     return {"total": total, "online": online, "today": today, "week": week}
 
+def get_user(user_id):
+    with engine.connect() as conn:
+        row = conn.execute(sql_text("SELECT * FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+    return row
+
+def get_user_bets(user_id):
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text("""
+            SELECT b.*, m.team1, m.team2, m.datetime, m.status 
+            FROM bets b 
+            JOIN matches m ON b.match_id = m.id 
+            WHERE b.user_id = :user_id 
+            ORDER BY b.created_at DESC
+        """), {"user_id": user_id}).fetchall()
+    return [{
+        "id": r.id,
+        "match_id": r.match_id,
+        "team1": r.team1,
+        "team2": r.team2,
+        "datetime": str(r.datetime),
+        "status": r.status,
+        "type": r.type,
+        "amount": r.amount,
+        "created_at": str(r.created_at)
+    } for r in rows]
+
+def get_all_bets():
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text("""
+            SELECT b.*, m.team1, m.team2, m.datetime, m.status, u.username, u.display_name 
+            FROM bets b 
+            JOIN matches m ON b.match_id = m.id 
+            JOIN users u ON b.user_id = u.id 
+            ORDER BY b.created_at DESC
+        """)).fetchall()
+    return [{
+        "id": r.id,
+        "user_id": r.user_id,
+        "username": r.username,
+        "display_name": r.display_name,
+        "match_id": r.match_id,
+        "team1": r.team1,
+        "team2": r.team2,
+        "datetime": str(r.datetime),
+        "status": r.status,
+        "type": r.type,
+        "amount": r.amount,
+        "created_at": str(r.created_at)
+    } for r in rows]
+
+def get_products():
+    with engine.connect() as conn:
+        # Если в базе нет товаров, добавляем тестовые
+        products = conn.execute(sql_text("SELECT * FROM products")).fetchall()
+        if not products:
+            test_products = [
+                {"name": "Футболка", "price": 500, "image": "product1.jpg", "description": "Официальная футболка лиги"},
+                {"name": "Кепка", "price": 300, "image": "product2.jpg", "description": "Стильная кепка с логотипом"},
+                {"name": "Сувенир", "price": 150, "image": "product3.jpg", "description": "Сувенирный набор"},
+                {"name": "Эксклюзивный набор", "price": 1000, "image": "product4.jpg", "description": "Полный набор фаната"}
+            ]
+            for product in test_products:
+                conn.execute(sql_text("""
+                    INSERT INTO products (name, price, image, description)
+                    VALUES (:name, :price, :image, :description)
+                """), product)
+            products = conn.execute(sql_text("SELECT * FROM products")).fetchall()
+    return [{
+        "id": p.id,
+        "name": p.name,
+        "price": p.price,
+        "image": p.image,
+        "description": p.description
+    } for p in products]
+
+def calculate_odds(match):
+    """Рассчитывает коэффициенты с учетом маржи 5%"""
+    total = match.odds_team1 + match.odds_team2 + match.odds_draw
+    if total == 0:
+        return {
+            'team1': 2.0,
+            'team2': 2.0,
+            'draw': 2.0
+        }
+    
+    k_factor = 1.05  # Маржа 5%
+    return {
+        'team1': round((100 / match.odds_team1) * k_factor, 2) if match.odds_team1 > 0 else 0,
+        'team2': round((100 / match.odds_team2) * k_factor, 2) if match.odds_team2 > 0 else 0,
+        'draw': round((100 / match.odds_draw) * k_factor, 2) if match.odds_draw > 0 else 0
+    }
+
+def process_bets_for_match(match_id, score1, score2):
+    """Обработка ставок после завершения матча"""
+    with engine.begin() as conn:
+        # Получаем информацию о матче
+        match = conn.execute(sql_text("SELECT * FROM matches WHERE id = :match_id"), {"match_id": match_id}).fetchone()
+        if not match:
+            return
+        
+        # Определяем результат матча
+        result = "draw"
+        if score1 > score2:
+            result = "team1"
+        elif score2 > score1:
+            result = "team2"
+        
+        # Получаем все ставки на матч
+        bets = conn.execute(sql_text("""
+            SELECT * FROM bets WHERE match_id = :match_id
+        """), {"match_id": match_id}).fetchall()
+        
+        # Рассчитываем коэффициенты
+        odds = calculate_odds(match)
+        
+        # Обрабатываем каждую ставку
+        for bet in bets:
+            # Если ставка выиграла
+            if bet.type == result:
+                # Рассчитываем выигрыш
+                win_amount = bet.amount * odds[result]
+                # Добавляем выигрыш пользователю
+                conn.execute(sql_text("""
+                    UPDATE users SET coins = coins + :win_amount WHERE id = :user_id
+                """), {"win_amount": win_amount, "user_id": bet.user_id})
+            # Если ставка проиграла, средства уже списаны при размещении ставки
+
 # --- Match helpers (simple wrappers) ---
 def get_matches(round_number=None):
     with engine.connect() as conn:
@@ -523,7 +805,7 @@ def get_team_players(team):
 
 def update_match_score(match_id, s1, s2):
     with engine.begin() as conn:
-        conn.execute(sql_text("UPDATE matches SET score1 = :s1, score2 = :s2, last_updated = NOW(), status = 'live' WHERE id = :id"),
+        conn.execute(sql_text("UPDATE matches SET score1 = :s1, score2 = :s2, last_updated = NOW(), status = 'finished' WHERE id = :id"),
                      {"s1": s1, "s2": s2, "id": match_id})
     return True
 
@@ -644,7 +926,7 @@ def generate_test_matches():
             teams = [("Динамо","Спартак"),("Торпедо","Зенит"),("Локомотив","Челси"),("Динамо","Зенит")]
             now = datetime.now(timezone.utc)
             for i, pair in enumerate(teams, start=1):
-                conn.execute(sql_text("INSERT INTO matches (round, team1, team2, datetime, stream_url) VALUES (:r,:a,:b,:dt,:url)"),
+                conn.execute(sql_text("INSERT INTO matches (round, team1, team2, datetime, stream_url, odds_team1, odds_team2) VALUES (:r,:a,:b,:dt,:url, 35, 65)"),
                              {"r": i, "a": pair[0], "b": pair[1], "dt": now + timedelta(days=i), "url": "https://www.youtube.com/embed/dQw4w9WgXcQ"})
             logger.info("Inserted test matches")
 
