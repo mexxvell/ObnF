@@ -67,7 +67,7 @@ engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 
 def init_db():
     with engine.connect() as conn:
-        # users table
+        # Создаем таблицу users если не существует
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS users (
                 id BIGINT PRIMARY KEY,
@@ -77,14 +77,30 @@ def init_db():
                 xp INTEGER DEFAULT 0,
                 coins INTEGER DEFAULT 0,
                 badges TEXT DEFAULT '',
-                streak INTEGER DEFAULT 0,
-                last_streak_date DATE,
                 referrer BIGINT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 banned_until TIMESTAMP
             )
         '''))
+        
+        # Проверяем и добавляем недостающие колонки
+        existing_columns = [row[0] for row in conn.execute(sql_text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'users'
+        """))]
+        
+        # Добавляем колонку streak если её нет
+        if 'streak' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0"))
+            logger.info("Added 'streak' column to users table")
+        
+        # Добавляем колонку last_streak_date если её нет
+        if 'last_streak_date' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE users ADD COLUMN last_streak_date DATE"))
+            logger.info("Added 'last_streak_date' column to users table")
+            
         # matches
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS matches (
@@ -466,8 +482,21 @@ def miniapp_cart():
 @app.route('/miniapp/admin')
 def miniapp_admin():
     user_id = session.get('user_id', 0)
+    logger.info(f"Попытка доступа к админ-панели: user_id={user_id}, OWNER_ID={OWNER_ID}")
+    
     if user_id != OWNER_ID:
+        logger.warning(f"Доступ запрещен: user_id={user_id} не совпадает с OWNER_ID={OWNER_ID}")
         return "Доступ запрещён", 403
+    
+    stats = current_online_counts()
+    orders = get_pending_orders()
+    bets = get_recent_bets()
+    
+    return render_template('admin.html', 
+                          stats=stats, 
+                          orders=orders, 
+                          bets=bets,
+                          user_id=user_id)
     
     stats = current_online_counts()
     orders = get_pending_orders()
