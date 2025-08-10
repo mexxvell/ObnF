@@ -7,46 +7,56 @@
     tg.ready();
     
     // Инициализация сессии
-    async function initSession() {
-        try {
-            const user = tg.initDataUnsafe?.user || null;
-            if (!user) {
-                console.error("User data not available from Telegram");
-                return;
-            }
-            
-            // Сохраняем реферальный параметр
-            const urlParams = new URLSearchParams(window.location.search);
-            const ref = urlParams.get('ref');
-            
-            // Отправляем данные на сервер
-            const payload = {
-                user_id: user.id,
-                username: user.username || "",
-                display_name: `${user.first_name} ${user.last_name || ""}`,
-                ref: ref
-            };
-            
-            const response = await fetch('/miniapp/init', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-            
-            const data = await response.json();
-            if (data.success) {
-                console.log('Session initialized');
-                // Обновляем информацию о пользователе
-                document.getElementById('user-mini').textContent = user.first_name || 'Пользователь';
-            } else {
-                console.error('Session init failed:', data.error);
-            }
-        } catch (error) {
-            console.error('Error initializing session:', error);
+async function initSession() {
+    try {
+        const tg = window.Telegram.WebApp;
+        const user = tg.initDataUnsafe?.user || null;
+        if (!user) {
+            console.error("User data not available from Telegram");
+            throw new Error("User data not available");
         }
+        
+        // Сохраняем реферальный параметр
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get('ref');
+        
+        // Отправляем данные на сервер
+        const payload = {
+            user_id: user.id,
+            username: user.username || "",
+            display_name: `${user.first_name} ${user.last_name || ""}`,
+            ref: ref
+        };
+        
+        const response = await fetch('/miniapp/init', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Server responded with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            console.log('Session initialized');
+            // Обновляем информацию о пользователе
+            const userMini = document.getElementById('user-mini');
+            if (userMini) {
+                userMini.textContent = user.first_name || 'Пользователь';
+            }
+            return true;
+        } else {
+            throw new Error(data.error || 'Session initialization failed');
+        }
+    } catch (error) {
+        console.error('Error initializing session:', error);
+        throw error; // Пробрасываем ошибку дальше
     }
+}
     
     // Установка активной вкладки
     function setActiveTab(tabName) {
@@ -293,23 +303,36 @@
         }
     }
     
-   document.addEventListener('DOMContentLoaded', () => {
-    // Анимация загрузки
-    const loadingScreen = document.getElementById('loading-screen');
+document.addEventListener('DOMContentLoaded', () => {
+    // Скрываем основной контент до завершения инициализации
     const appContainer = document.getElementById('app-container');
+    const loadingScreen = document.getElementById('loading-screen');
+    const frame = document.getElementById('page-frame');
     
-    // Показываем экран загрузки на 5 секунд
-    setTimeout(() => {
-        // Сначала плавно скрываем экран загрузки
-        loadingScreen.style.opacity = '0';
-        
-        // После анимации скрываем полностью и показываем приложение
-        setTimeout(() => {
-            loadingScreen.style.display = 'none';
-            appContainer.classList.remove('hidden');
-			
-		// Теперь инициализируем приложение	
-        initSession();
+    if (frame) {
+        frame.style.display = 'none'; // Скрываем iframe
+    }
+    
+    // Сначала инициализируем сессию
+    initSession()
+        .then(() => {
+            // После успешной инициализации показываем приложение
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => {
+                    if (loadingScreen) {
+                        loadingScreen.style.display = 'none';
+                    }
+                    if (appContainer) {
+                        appContainer.classList.remove('hidden');
+                    }
+                    if (frame) {
+                        frame.style.display = 'block';
+                    }
+                }, 500);
+            }
+            
+            // Настраиваем интерфейс
             setupBottomMenu();
             setupSideMenu();
             setupLinkHandlers();
@@ -317,16 +340,67 @@
             setupIframeHandler();
             setupErrorHandlers();
             
-            // Запускаем опрос уведомлений каждые 8 секунд
+            // Запускаем опрос уведомлений
             pollNotifications();
             pollInterval = setInterval(pollNotifications, 8000);
             
             // Устанавливаем активную вкладку
             const activeTab = getActiveTabFromUrl();
             setActiveTab(activeTab);
-        }, 500);
-    }, 5000); // 5 секунд загрузки
-});
+            
+            // Загружаем содержимое активной вкладки
+            loadActiveTabContent(activeTab);
+        })
+        .catch(error => {
+            console.error('Critical error during session initialization:', error);
+            showNotification('Ошибка инициализации сессии. Пожалуйста, перезагрузите приложение.', 'error');
+            
+            // Показываем приложение даже при ошибке, но с уведомлением
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => {
+                    if (loadingScreen) {
+                        loadingScreen.style.display = 'none';
+                    }
+                    if (appContainer) {
+                        appContainer.classList.remove('hidden');
+                    }
+                }, 500);
+            }
+        });
+    
+    // Добавляем функцию для загрузки содержимого вкладки
+    function loadActiveTabContent(tabName) {
+        if (!frame) return;
+        
+        switch (tabName) {
+            case 'home':
+                frame.src = '/miniapp/home';
+                break;
+            case 'nlo':
+                frame.src = '/miniapp/nlo';
+                break;
+            case 'pred':
+                frame.src = '/miniapp/predictions';
+                break;
+            case 'profile':
+                frame.src = '/miniapp/profile';
+                break;
+            case 'support':
+                frame.src = '/miniapp/support';
+                break;
+            default:
+                frame.src = '/miniapp/home';
+        }
+        
+        // Добавляем небольшую задержку перед показом, чтобы дать время на загрузку
+        setTimeout(() => {
+            if (frame) {
+                frame.style.opacity = '1';
+                frame.style.transition = 'opacity 0.3s ease';
+            }
+        }, 300);
+    }
     
     // Очистка при разгрузке
     window.addEventListener('beforeunload', () => {
@@ -334,4 +408,4 @@
             clearInterval(pollInterval);
         }
     });
-})();
+});

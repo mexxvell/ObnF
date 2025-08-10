@@ -344,7 +344,12 @@ def miniapp_init():
 def miniapp_home():
     user_id = session.get('user_id', 0)
     if not user_id:
-        return "Not authorized", 403
+        # Добавляем небольшую задержку для синхронизации сессии
+        time.sleep(0.5)
+        user_id = session.get('user_id', 0)
+        if not user_id:
+            logger.warning("User not authorized in /miniapp/home after retry")
+            return "Not authorized", 403
     
     rounds = []
     for r in range(1, 4):
@@ -1394,54 +1399,47 @@ def get_user_stats(user_id):
 def get_products():
     """Возвращает список товаров"""
     with engine.connect() as conn:
-        # Если в базе нет товаров, добавляем тестовые
+        # Проверяем, существуют ли необходимые колонки
+        existing_columns = [row[0] for row in conn.execute(sql_text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'products'
+        """))]
+        
+        # Если таблица пуста, добавляем тестовые товары
         products = conn.execute(sql_text("SELECT * FROM products")).fetchall()
         if not products:
+            # Создаем тестовые товары
             test_products = [
-                {
-                    "name": "Официальная футболка",
-                    "price": 3500,  # в кредитах
-                    "image": "product1.png",
-                    "description": "Официальная футболка Лиги",
-                    "stock": 100
-                },
-                {
-                    "name": "Стильная кепка",
-                    "price": 1500,
-                    "image": "product2.png",
-                    "description": "Кепка с логотипом Лиги",
-                    "stock": 50
-                },
-                {
-                    "name": "Сувенирный набор",
-                    "price": 2500,
-                    "image": "product3.png",
-                    "description": "Набор сувениров Лиги",
-                    "stock": 30
-                },
-                {
-                    "name": "Эксклюзивный набор",
-                    "price": 5000,
-                    "image": "product4.png",
-                    "description": "Полный эксклюзивный набор фаната",
-                    "stock": 10
-                }
+                ("Официальная футболка", 3500, "product1.png", "Официальная футболка Лиги", 100),
+                ("Кепка", 2000, "product2.png", "Стильная кепка с логотипом", 50),
+                ("Кружка", 1500, "product3.png", "Керамическая кружка", 75),
+                ("Брелок", 500, "product4.png", "Металлический брелок", 200)
             ]
+            
             for product in test_products:
                 conn.execute(sql_text("""
                     INSERT INTO products (name, price, image, description, stock)
-                    VALUES (:name, :price, :image, :description, :stock)
-                """), product)
+                    VALUES (%(name)s, %(price)s, %(image)s, %(description)s, %(stock)s)
+                """), {
+                    "name": product[0],
+                    "price": product[1],
+                    "image": product[2],
+                    "description": product[3],
+                    "stock": product[4]
+                })
+            
             products = conn.execute(sql_text("SELECT * FROM products")).fetchall()
-    
-    return [{
-        "id": p.id,
-        "name": p.name,
-        "price": p.price,
-        "image": p.image,
-        "description": p.description,
-        "stock": p.stock
-    } for p in products]
+            logger.info(f"Added {len(test_products)} test products to database")
+        
+        return [{
+            "id": p.id,
+            "name": p.name,
+            "price": p.price,
+            "image": p.image,
+            "description": p.description,
+            "stock": p.stock
+        } for p in products]
 
 def get_product(product_id):
     """Возвращает товар по ID"""
@@ -2115,31 +2113,45 @@ def sync_matches_to_db():
         
         # Синхронизируем с базой данных
         with engine.begin() as conn:
+            # Проверяем существование колонок
+            existing_columns = [row[0] for row in conn.execute(sql_text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'matches'
+            """))]
+            
             # Очищаем существующие матчи
             conn.execute(sql_text("DELETE FROM matches"))
             
             # Добавляем новые матчи
             for match in matches:
-                conn.execute(sql_text("""
-                    INSERT INTO matches (
-                        round, team1, team2, score1, score2, datetime, status,
-                        odds_team1, odds_team2, odds_draw
-                    ) VALUES (
-                        :round, :team1, :team2, :score1, :score2, :datetime, :status,
-                        :odds_team1, :odds_team2, :odds_draw
-                    )
-                """), {
+                # Формируем параметры вставки
+                params = {
                     "round": match["round"],
                     "team1": match["team1"],
                     "team2": match["team2"],
                     "score1": match["score1"],
                     "score2": match["score2"],
                     "datetime": match["datetime"],
-                    "status": match["status"],
-                    "odds_team1": match["odds_team1"],
-                    "odds_team2": match["odds_team2"],
-                    "odds_draw": match["odds_draw"]
-                })
+                    "status": match["status"]
+                }
+                
+                # Добавляем коэффициенты, если колонки существуют
+                if 'odds_team1' in existing_columns:
+                    params["odds_team1"] = match["odds_team1"]
+                if 'odds_team2' in existing_columns:
+                    params["odds_team2"] = match["odds_team2"]
+                if 'odds_draw' in existing_columns:
+                    params["odds_draw"] = match["odds_draw"]
+                
+                # Формируем SQL-запрос
+                columns = ", ".join(params.keys())
+                placeholders = ", ".join([f":{k}" for k in params.keys()])
+                
+                conn.execute(sql_text(f"""
+                    INSERT INTO matches ({columns})
+                    VALUES ({placeholders})
+                """), params)
         
         logger.info(f"Synced {len(matches)} matches to database")
     except Exception as e:
