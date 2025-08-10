@@ -1,7 +1,15 @@
 {% extends "layout_base.html" %}
 {% block content %}
-<div class="app-shell">
-    <header class="app-header">
+<div id="loading-screen" class="loading-screen">
+    <div class="loading-logo">
+        <img src="{{ url_for('static', filename='images/league-logo.png') }}" alt="Логотип Лиги">
+        <div class="loading-text">Загрузка приложения</div>
+    </div>
+</div>
+
+<div id="app-container" class="app-container hidden">
+    <div class="app-shell">
+        <header class="app-header">
         <button id="burger" class="burger">☰</button>
         <h1>Городская Футбольная Лига</h1>
         <div id="user-mini" class="user-mini"></div>

@@ -1231,7 +1231,6 @@ def get_user_stats(user_id):
             "user_id": user_id
         }).scalar()
         
-        # СНАЧАЛА ВЫЧИСЛЯЕМ won_bets И lost_bets
         won_bets = 0
         lost_bets = 0
         
@@ -1257,110 +1256,87 @@ def get_user_stats(user_id):
         
         # Средний коэффициент
         try:
-            avg_odds = conn.execute(sql_text("""
-                SELECT AVG(odds) FROM (
-                    SELECT 
-                        CASE 
-                            WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
-                            WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
-                            WHEN b.type = 'draw' THEN m.odds_draw / 100.0
-                            ELSE 1.0
-                        END as odds
-                    FROM bets b
-                    JOIN matches m ON b.match_id = m.id
-                    WHERE b.user_id = :user_id
-                ) as odds_table
-            """), {
-                "user_id": user_id
-            }).scalar() or 1.0
+            # Проверяем, есть ли колонки odds_team1, odds_team2, odds_draw в таблице matches
+            has_odds_columns = conn.execute(sql_text("""
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'matches' 
+                AND column_name IN ('odds_team1', 'odds_team2', 'odds_draw')
+            """)).fetchall()
+            
+            if has_odds_columns:
+                avg_odds = conn.execute(sql_text("""
+                    SELECT AVG(odds) FROM (
+                        SELECT 
+                            CASE 
+                                WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
+                                WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
+                                WHEN b.type = 'draw' THEN m.odds_draw / 100.0
+                                ELSE 1.0
+                            END as odds
+                        FROM bets b
+                        LEFT JOIN matches m ON b.match_id = m.id
+                        WHERE b.user_id = :user_id
+                    ) as odds_table
+                """), {
+                    "user_id": user_id
+                }).scalar() or 1.0
+            else:
+                avg_odds = 1.0
         except Exception as e:
-            logger.error(f"Error calculating average odds: {e}")
+            logger.error(f"Error calculating average odds: {e}", exc_info=True)
             avg_odds = 1.0
         
         # Топ-10 пользователей
         try:
-            top_users = conn.execute(sql_text("""
-                SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
-                       SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) * 100.0 / COUNT(b.id) as win_percent,
-                       AVG(
-                           CASE 
-                               WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
-                               WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
-                               WHEN b.type = 'draw' THEN m.odds_draw / 100.0
-                               ELSE 1.0
-                           END
-                       ) as avg_odds
-                FROM users u
-                LEFT JOIN bets b ON u.id = b.user_id
-                LEFT JOIN matches m ON b.match_id = m.id
-                GROUP BY u.id
-                ORDER BY bet_count DESC, win_percent DESC, avg_odds DESC
-                LIMIT 10
+            # Проверяем, есть ли колонка status в таблице bets
+            has_status_column_in_bets = conn.execute(sql_text("""
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'bets' AND column_name = 'status'
+            """)).scalar()
+            
+            # Проверяем, есть ли колонки odds в таблице matches
+            has_odds_columns = conn.execute(sql_text("""
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'matches' 
+                AND column_name IN ('odds_team1', 'odds_team2', 'odds_draw')
             """)).fetchall()
+            
+            if has_status_column_in_bets and has_odds_columns:
+                top_users = conn.execute(sql_text("""
+                    SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
+                           SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(b.id), 0) as win_percent,
+                           AVG(
+                               CASE 
+                                   WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
+                                   WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
+                                   WHEN b.type = 'draw' THEN m.odds_draw / 100.0
+                                   ELSE 1.0
+                               END
+                           ) as avg_odds
+                    FROM users u
+                    LEFT JOIN bets b ON u.id = b.user_id
+                    LEFT JOIN matches m ON b.match_id = m.id
+                    GROUP BY u.id
+                    HAVING COUNT(b.id) > 0
+                    ORDER BY bet_count DESC, win_percent DESC, avg_odds DESC
+                    LIMIT 10
+                """)).fetchall()
+            else:
+                # Более простой запрос без использования статуса и коэффициентов
+                top_users = conn.execute(sql_text("""
+                    SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
+                           0 as win_percent,
+                           1.0 as avg_odds
+                    FROM users u
+                    LEFT JOIN bets b ON u.id = b.user_id
+                    GROUP BY u.id
+                    HAVING COUNT(b.id) > 0
+                    ORDER BY bet_count DESC
+                    LIMIT 10
+                """)).fetchall()
         except Exception as e:
-            logger.error(f"Error getting top users: {e}")
+            logger.error(f"Error getting top users: {e}", exc_info=True)
             top_users = []
-            
-        won_bets = 0
-        lost_bets = 0
-        
-        if has_status_column:
-            won_bets = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM bets 
-                WHERE user_id = :user_id AND status = 'won'
-            """), {
-                "user_id": user_id
-            }).scalar()
-            
-            lost_bets = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM bets 
-                WHERE user_id = :user_id AND status = 'lost'
-            """), {
-                "user_id": user_id
-            }).scalar()
-        else:
-            # Для совместимости со старыми данными без колонки status
-            # Предполагаем, что все ставки активны
-            won_bets = 0
-            lost_bets = 0
-        
-        # Средний коэффициент
-        avg_odds = conn.execute(sql_text("""
-            SELECT AVG(odds) FROM (
-                SELECT 
-                    CASE 
-                        WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
-                        WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
-                        WHEN b.type = 'draw' THEN m.odds_draw / 100.0
-                        ELSE 1.0
-                    END as odds
-                FROM bets b
-                JOIN matches m ON b.match_id = m.id
-                WHERE b.user_id = :user_id
-            ) as odds_table
-        """), {
-            "user_id": user_id
-        }).scalar() or 1.0
-        
-        # Топ-10 пользователей
-        top_users = conn.execute(sql_text("""
-            SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
-                   SUM(CASE WHEN b.status = 'won' THEN 1 ELSE 0 END) * 100.0 / COUNT(b.id) as win_percent,
-                   AVG(
-                       CASE 
-                           WHEN b.type = 'team1' THEN m.odds_team1 / 100.0
-                           WHEN b.type = 'team2' THEN m.odds_team2 / 100.0
-                           WHEN b.type = 'draw' THEN m.odds_draw / 100.0
-                           ELSE 1.0
-                       END
-                   ) as avg_odds
-            FROM users u
-            LEFT JOIN bets b ON u.id = b.user_id
-            LEFT JOIN matches m ON b.match_id = m.id
-            GROUP BY u.id
-            ORDER BY bet_count DESC, win_percent DESC, avg_odds DESC
-            LIMIT 10
-        """)).fetchall()
     
     return {
         "total_bets": total_bets,
@@ -1629,7 +1605,8 @@ def process_bets_for_match(match_id, score1, score2):
                 # Для примера, предположим, что если разница в 1 гол, то пенальти
                 if abs(score1 - score2) == 1:
                     expected = "yes" if bet.prediction.lower() == "yes" else "no"
-                    actual = "yes" if (score1 == 0 and score2 == 0) else "no"  # Заглушка
+                    # В реальности здесь должна быть проверка на пенальти из данных матча
+                    actual = "yes"  # Временное решение
                     if expected == actual:
                         status = "won"
                         payout = bet.amount * 2.0
@@ -1642,7 +1619,8 @@ def process_bets_for_match(match_id, score1, score2):
                 # Для примера, предположим, что если разница в 2 гола, то удаление
                 if abs(score1 - score2) >= 2:
                     expected = "yes" if bet.prediction.lower() == "yes" else "no"
-                    actual = "yes"  # Заглушка
+                    # В реальности здесь должна быть проверка на удаление из данных матча
+                    actual = "yes"  # Временное решение
                     if expected == actual:
                         status = "won"
                         payout = bet.amount * 2.0
@@ -1988,6 +1966,10 @@ def get_matches_from_sheets():
             
             # Извлекаем данные
             team1 = row[0].strip() if row[0] else ""
+            # Обработка счета для команды 1 (столбец B)
+            score1 = int(row[1]) if len(row) > 1 and row[1].isdigit() else 0
+            # Обработка счета для команды 2 (столбец D)
+            score2 = int(row[3]) if len(row) > 3 and row[3].isdigit() else 0
             team2 = row[4].strip() if len(row) > 4 and row[4] else ""
             date_str = row[5].strip() if len(row) > 5 and row[5] else ""
             time_str = row[6].strip() if len(row) > 6 and row[6] else ""
@@ -2007,7 +1989,7 @@ def get_matches_from_sheets():
                 if time_str:
                     date_time_str += f" {time_str}"
                 
-                    # Создаем объект datetime с временной зоной UTC
+                # Создаем объект datetime
                 if time_str:
                     match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
                 else:
@@ -2018,6 +2000,9 @@ def get_matches_from_sheets():
             # Определяем статус матча с учетом временной зоны
             current_time = datetime.now(timezone.utc)
             status = "scheduled" if match_datetime > current_time else "finished"
+            # Если матч завершен, но счет не 0-0, то статус "finished"
+            if status == "finished" and (score1 > 0 or score2 > 0):
+                status = "finished"
             
             # Добавляем матч
             matches.append({
@@ -2025,10 +2010,10 @@ def get_matches_from_sheets():
                 "round": round_number,
                 "team1": team1,
                 "team2": team2,
-                "score1": 0,
-                "score2": 0,
+                "score1": score1,
+                "score2": score2,
                 "datetime": match_datetime,
-                "status": "scheduled" if match_datetime > datetime.now(timezone.utc) else "finished",
+                "status": status,
                 "odds_team1": 35,
                 "odds_team2": 65,
                 "odds_draw": 0
@@ -2043,7 +2028,7 @@ def get_matches_from_sheets():
         
         return matches
     except Exception as e:
-        logger.error(f"Ошибка при получении матчей из Google Sheets: {e}")
+        logger.error(f"Ошибка при получении матчей из Google Sheets: {e}", exc_info=True)
         if MATCHES_CACHE['data'] is not None:
             return MATCHES_CACHE['data']  # Возвращаем старые данные при ошибке
         return []
@@ -2060,8 +2045,7 @@ def sync_matches_to_db():
         
         # Синхронизируем с базой данных
         with engine.begin() as conn:
-            # Очищаем существующие матчи (или помечаем как архивные)
-            # Вместо удаления, можно пометить старые матчи как архивные
+            # Очищаем существующие матчи
             conn.execute(sql_text("DELETE FROM matches"))
             
             # Добавляем новые матчи
@@ -2089,7 +2073,7 @@ def sync_matches_to_db():
         
         logger.info(f"Synced {len(matches)} matches to database")
     except Exception as e:
-        logger.error(f"Error syncing matches to database: {e}")
+        logger.error(f"Error syncing matches to database: {e}", exc_info=True)
         
 # --- Test data generator (if no matches) ---
 def generate_test_matches():

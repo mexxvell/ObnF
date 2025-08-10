@@ -293,24 +293,40 @@
         }
     }
     
-    // Инициализация приложения
-    document.addEventListener('DOMContentLoaded', () => {
+   document.addEventListener('DOMContentLoaded', () => {
+    // Анимация загрузки
+    const loadingScreen = document.getElementById('loading-screen');
+    const appContainer = document.getElementById('app-container');
+    
+    // Показываем экран загрузки на 5 секунд
+    setTimeout(() => {
+        // Сначала плавно скрываем экран загрузки
+        loadingScreen.style.opacity = '0';
+        
+        // После анимации скрываем полностью и показываем приложение
+        setTimeout(() => {
+            loadingScreen.style.display = 'none';
+            appContainer.classList.remove('hidden');
+			
+		// Теперь инициализируем приложение	
         initSession();
-        setupBottomMenu();
-        setupSideMenu();
-        setupLinkHandlers();
-        setupNavigation();
-        setupIframeHandler();
-        setupErrorHandlers();
-        
-        // Запускаем опрос уведомлений каждые 8 секунд
-        pollNotifications();
-        pollInterval = setInterval(pollNotifications, 8000);
-        
-        // Устанавливаем активную вкладку
-        const activeTab = getActiveTabFromUrl();
-        setActiveTab(activeTab);
-    });
+            setupBottomMenu();
+            setupSideMenu();
+            setupLinkHandlers();
+            setupNavigation();
+            setupIframeHandler();
+            setupErrorHandlers();
+            
+            // Запускаем опрос уведомлений каждые 8 секунд
+            pollNotifications();
+            pollInterval = setInterval(pollNotifications, 8000);
+            
+            // Устанавливаем активную вкладку
+            const activeTab = getActiveTabFromUrl();
+            setActiveTab(activeTab);
+        }, 500);
+    }, 5000); // 5 секунд загрузки
+});
     
     // Очистка при разгрузке
     window.addEventListener('beforeunload', () => {
