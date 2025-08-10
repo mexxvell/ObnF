@@ -169,14 +169,21 @@ gs_client = None
 if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
     try:
         creds_dict = json.loads(GS_CREDS_JSON)
-        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+        scope = [
+    'https://spreadsheets.google.com/feeds',
+    'https://www.googleapis.com/auth/drive'
+]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gs_client = gspread.authorize(creds)
         sheet = gs_client.open_by_key(GS_SHEET_ID)
         logger.info("Google Sheets connected")
     except Exception as e:
-        logger.warning("Google Sheets connection failed: %s", e)
+        logger.error("Google Sheets connection failed: %s", e)
         gs_client = None
+else:
+    logger.info("Google Sheets is not enabled (GS_ENABLED=%s, GS_CREDS_JSON=%s, GS_SHEET_ID=%s)", 
+                GS_ENABLED, bool(GS_CREDS_JSON), bool(GS_SHEET_ID))
+    gs_client = None
 
 # --- Flask and TeleBot ---
 app = Flask(__name__, static_folder='static', template_folder='templates')
