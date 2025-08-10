@@ -530,12 +530,76 @@ const progressInterval = setInterval(() => {
     }
 }, 300);
 
-// Остановка прогресса при завершении инициализации
+// ОБЪЕДИНЕННАЯ функция завершения инициализации
 const completeInitialization = (success = true) => {
     clearTimeout(initTimeoutId);
     clearInterval(progressInterval);
     updateProgress(100);
     
+    // Плавно скрываем экран загрузки
+    if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+            if (loadingScreen) {
+                loadingScreen.style.display = 'none';
+            }
+            if (appContainer) {
+                appContainer.classList.remove('hidden');
+            }
+            if (frame && success) {
+                frame.style.display = 'block';
+            }
+        }, 500);
+    }
+    
+    if (success) {
+        // Настраиваем интерфейс
+        setupBottomMenu();
+        setupSideMenu();
+        setupLinkHandlers();
+        setupNavigation();
+        setupIframeHandler();
+        setupErrorHandlers();
+        
+        // Запускаем опрос уведомлений
+        pollNotifications();
+        pollInterval = setInterval(pollNotifications, 8000);
+        
+        // Устанавливаем активную вкладку
+        const activeTab = getActiveTabFromUrl();
+        setActiveTab(activeTab);
+        
+        // Загружаем содержимое активной вкладки
+        loadActiveTabContent(activeTab);
+    } else {
+        // Показываем уведомление об ошибке
+        showNotification('Не удалось инициализировать приложение. Проверьте соединение и перезагрузите страницу.', 'error');
+        
+        // Все равно показываем приложение, чтобы пользователь мог перезагрузить
+        if (appContainer) {
+            appContainer.classList.remove('hidden');
+        }
+        
+        // Показываем сообщение об ошибке в основном контенте
+        if (frame) {
+            frame.style.display = 'block';
+            frame.src = 'about:blank';
+            frame.onload = function() {
+                const errorContent = `
+                    <div style="padding: 20px; text-align: center; color: #ff6b6b;">
+                        <h2>Ошибка инициализации</h2>
+                        <p>Не удалось загрузить приложение. Пожалуйста, перезагрузите страницу.</p>
+                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                            Перезагрузить
+                        </button>
+                    </div>
+                `;
+                frame.contentDocument.open();
+                frame.contentDocument.write(errorContent);
+                frame.contentDocument.close();
+            };
+        }
+    }
 };
     // Запускаем инициализацию
     initSessionWithCheck()
