@@ -1,30 +1,133 @@
 {% extends "layout_base.html" %}
 {% block content %}
-<div class="page page-profile">
-  <h2>Профиль</h2>
-  {% if session.get('user_id') %}
-    {% set uid = session.get('user_id') %}
-    <div id="profile-card">
-      <p>Пользователь: {{ uid }}</p>
-      <!-- данные будут подгружаться фронтендом через API -->
-      <div id="profile-stats">
-        <p>Уровень: <span id="level">—</span></p>
-        <p>XP: <span id="xp">—</span></p>
-        <p>Бейджи: <span id="badges">—</span></p>
-        <p>Реф. ссылка: <input id="ref-link" readonly value="{{ request.host_url|trim('/') ~ '/miniapp?ref=' ~ uid }}"></p>
-      </div>
+<div class="page profile-page">
+    <div class="profile-header">
+        <div class="user-avatar">
+            <span class="avatar-initials">{{ user.display_name[0:2] }}</span>
+        </div>
+        <h1>{{ user.display_name }}</h1>
+        <div class="user-stats">
+            <div class="stat-item">
+                <span class="stat-value">{{ user.level }}</span>
+                <span class="stat-label">Уровень</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{ user.xp }}</span>
+                <span class="stat-label">XP</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value">{{ user.coins }}</span>
+                <span class="stat-label">Кредиты</span>
+            </div>
+        </div>
     </div>
-  {% else %}
-    <p>Не авторизован</p>
-  {% endif %}
+    
+    <div class="daily-checkin">
+        <h3>Ежедневный чекин</h3>
+        <div class="streak-container">
+            <div class="streak-days">
+                {% for day in range(1, 8) %}
+                <div class="streak-day {% if day <= user.streak %}active{% endif %}">
+                    <span class="day-number">{{ day }}</span>
+                    <span class="day-reward">{{ [10, 20, 30, 40, 50, 60, 500][day-1] }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <button id="daily-checkin-btn" class="btn">Получить бонус</button>
+        </div>
+    </div>
+    
+    <div class="profile-tabs">
+        <button class="profile-tab active" data-tab="stats">Статистика</button>
+        <button class="profile-tab" data-tab="achievements">Достижения</button>
+        <button class="profile-tab" data-tab="referrals">Рефералы</button>
+    </div>
+    
+    <div class="profile-tab-content active" data-tab-content="stats">
+        <h3>Статистика прогнозов</h3>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-number">{{ stats.total_bets }}</span>
+                <span class="stat-label">Всего ставок</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">{{ stats.win_percent }}%</span>
+                <span class="stat-label">Процент выигрышных</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">{{ stats.avg_odds }}</span>
+                <span class="stat-label">Средний коэффициент</span>
+            </div>
+        </div>
+        
+        <h3>Топ-10 прогнозистов</h3>
+        <div class="leaderboard">
+            <div class="leaderboard-header">
+                <span>#</span>
+                <span>Имя</span>
+                <span>Ставки</span>
+                <span>% побед</span>
+            </div>
+            <div class="leaderboard-body">
+                {% for user in stats.top_users %}
+                <div class="leaderboard-row {% if user.id == current_user.id %}current-user{% endif %}">
+                    <span class="position">{{ loop.index }}</span>
+                    <span class="name">{{ user.display_name }}</span>
+                    <span class="bets">{{ user.bet_count }}</span>
+                    <span class="win-rate">{{ user.win_percent }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="profile-tab-content" data-tab-content="achievements">
+        <h3>Ваши достижения</h3>
+        <div class="achievements-grid">
+            {% if achievements|length == 0 %}
+            <p class="no-achievements">У вас пока нет достижений. Начните делать ставки и получайте награды!</p>
+            {% else %}
+            {% for achievement in achievements %}
+            <div class="achievement-card {{ achievement.tier }}">
+                <div class="achievement-icon">
+                    {% if achievement.tier == 'bronze' %}
+                    <i class="icon-achievement-bronze"></i>
+                    {% elif achievement.tier == 'silver' %}
+                    <i class="icon-achievement-silver"></i>
+                    {% else %}
+                    <i class="icon-achievement-gold"></i>
+                    {% endif %}
+                </div>
+                <div class="achievement-info">
+                    <h4>{{ achievement.name }}</h4>
+                    <p>{{ achievement.description }}</p>
+                    <span class="achievement-date">{{ achievement.achieved_at|datetime }}</span>
+                </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="profile-tab-content" data-tab-content="referrals">
+        <h3>Ваши рефералы</h3>
+        <div class="referral-info">
+            <p>Приглашайте друзей и получайте бонусы за каждого зарегистрированного!</p>
+            <div class="referral-stats">
+                <div class="stat-item">
+                    <span class="stat-value" id="referral-count">0</span>
+                    <span class="stat-label">Приглашено друзей</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="referral-bonus">0</span>
+                    <span class="stat-label">Получено кредитов</span>
+                </div>
+            </div>
+            <div class="referral-link">
+                <input type="text" id="referral-link" readonly value="{{ referral_link }}">
+                <button id="copy-referral-link" class="btn">Скопировать</button>
+            </div>
+        </div>
+    </div>
 </div>
-
-<script>
-  // загрузка данных профиля
-  async function loadProfile(){
-    const res = await fetch('/miniapp/notifications'); // re-use endpoint if you have an API; else create /miniapp/profile_api
-    // placeholder: request user data endpoint later
-  }
-  document.addEventListener('DOMContentLoaded', loadProfile);
-</script>
 {% endblock %}

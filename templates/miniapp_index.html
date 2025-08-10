@@ -1,48 +1,43 @@
 {% extends "layout_base.html" %}
 {% block content %}
 <div class="app-shell">
-  <header class="app-header">
-    <button id="burger" class="burger">☰</button>
-    <h1>Городская Футбольная Лига</h1>
-    <div id="user-mini"></div>
-  </header>
+    <header class="app-header">
+        <button id="burger" class="burger">☰</button>
+        <h1>Городская Футбольная Лига</h1>
+        <div id="user-mini" class="user-mini"></div>
+        <div class="league-logo">
+            <img src="{{ url_for('static', filename='images/league-logo.png') }}" alt="Логотип Лиги">
+        </div>
+    </header>
 
-  <nav id="bottom-menu" class="bottom-menu">
-    <button data-tab="home" class="tab-btn active">Главная</button>
-    <button data-tab="nlo" class="tab-btn">НЛО 8×8</button>
-    <button data-tab="pred" class="tab-btn">Прогнозы</button>
-    <button data-tab="profile" class="tab-btn">Профиль</button>
-    <button data-tab="support" class="tab-btn">Поддержка</button>
-  </nav>
+    <nav id="bottom-menu" class="bottom-menu">
+        <button data-tab="home" class="tab-btn active">Главная</button>
+        <button data-tab="nlo" class="tab-btn">НЛО 8×8</button>
+        <button data-tab="pred" class="tab-btn">Прогнозы</button>
+        <button data-tab="profile" class="tab-btn">Профиль</button>
+        <button data-tab="support" class="tab-btn">Поддержка</button>
+    </nav>
 
-  <main id="main-content" class="main-content">
-    <!-- Контент подгружается через AJAX -->
-    <iframe id="page-frame" src="/miniapp/home" frameborder="0" style="width:100%;height:100vh"></iframe>
-  </main>
+    <main id="main-content" class="main-content">
+        <iframe id="page-frame" src="/miniapp/home" frameborder="0" style="width:100%;height:100vh"></iframe>
+    </main>
 
-  <!-- Баннер уведомлений -->
-  <div id="live-banner" class="live-banner hidden"></div>
+    <div id="live-banner" class="live-banner hidden"></div>
 
-  <!-- Боковое меню -->
-  <div id="side-menu" class="side-menu hidden">
-    <ul>
-      <li><a href="/miniapp/home" target="page-frame">Главная</a></li>
-      <li><a href="/miniapp/matches" target="page-frame">Ближайшие матчи</a></li>
-      <li><a href="/miniapp/results" target="page-frame">Результаты</a></li>
-      <li><a href="/miniapp/tournaments" target="page-frame">Турнирная таблица</a></li>
-      <li><a href="/miniapp/profile" target="page-frame">Профиль</a></li>
-      <li><a href="/miniapp/shop" target="page-frame">Магазин</a></li>
-      <li><a href="/miniapp/admin" target="page-frame">Админ</a></li>
-      <li><a href="#" id="close-burger">Закрыть</a></li>
-    </ul>
-  </div>
+    <div id="side-menu" class="side-menu hidden">
+        <ul>
+            <li><a href="/miniapp/home" target="page-frame">Главная</a></li>
+            <li><a href="/miniapp/matches" target="page-frame">Ближайшие матчи</a></li>
+            <li><a href="/miniapp/results" target="page-frame">Результаты</a></li>
+            <li><a href="/miniapp/standings" target="page-frame">Турнирная таблица</a></li>
+            <li><a href="/miniapp/profile" target="page-frame">Профиль</a></li>
+            <li><a href="/miniapp/shop" target="page-frame">Магазин</a></li>
+            <li><a href="/miniapp/cart" target="page-frame">Корзина</a></li>
+            {% if current_user.id == owner_id %}
+            <li><a href="/miniapp/admin" target="page-frame">Админ</a></li>
+            {% endif %}
+            <li><a href="#" id="close-burger">Закрыть</a></li>
+        </ul>
+    </div>
 </div>
-
-<script>
-  // Обработка реферального параметра
-  (function(){
-    const params = new URLSearchParams(window.location.search);
-    window.INIT_REF = params.get('ref') || null;
-  })();
-</script>
 {% endblock %}

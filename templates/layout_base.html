@@ -1,8 +1,17 @@
-<!-- templates/layout_base.html -->
-<nav class="bottom-menu">
-  <button data-tab="home" class="tab-btn active">Главная</button>
-  <button data-tab="tournaments" class="tab-btn">Турниры</button>
-  <button data-tab="nft" class="tab-btn">NFT</button>
-  <button data-tab="profile" class="tab-btn">Профиль</button>
-  <button data-tab="support" class="tab-btn">Поддержка</button>
-</nav>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Городская Футбольная Лига</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/animations.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/notifications.css') }}">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    {% block content %}{% endblock %}
+    
+    <script src="{{ url_for('static', filename='js/miniapp.js') }}"></script>
+</body>
+</html>

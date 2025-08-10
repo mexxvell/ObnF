@@ -1,26 +1,56 @@
 {% extends "layout_base.html" %}
 {% block content %}
-<div class="page page-home">
-  <section class="hero">
-    <h2>Добро пожаловать в Лигу</h2>
-    <p>Тут трансляции, прогнозы и магазин нашего мерча.</p>
-  </section>
+<div class="page home-page">
+    <div class="hero">
+        <h2>Добро пожаловать в Городскую Футбольную Лигу</h2>
+        <p>Следите за матчами, делайте прогнозы и получайте призы</p>
+    </div>
 
-  <section class="cards">
-    <a class="card" href="/miniapp/matches" target="page-frame">
-      <h3>Ближайшие матчи</h3>
-      <p>Три ближайших тура и прямые трансляции</p>
-    </a>
-
-    <a class="card" href="/miniapp/shop" target="page-frame">
-      <h3>Магазин</h3>
-      <p>Футболки, кепки и фирменный мерч</p>
-    </a>
-
-    <a class="card" href="/miniapp/profile" target="page-frame">
-      <h3>Профиль</h3>
-      <p>Уровни, бейджи, рефералы</p>
-    </a>
-  </section>
+    <div class="matches-section">
+        <h3>Ближайшие матчи</h3>
+        
+        {% for round in rounds %}
+        <div class="round-section">
+            <h4>Тур {{ round.number }}</h4>
+            <div class="matches-list">
+                {% for match in round.matches %}
+                <div class="match-card">
+                    <div class="match-header">
+                        <div class="match-date">
+                            {{ match.datetime.strftime('%d.%m.%Y') if match.datetime else 'Дата не указана' }}
+                        </div>
+                        <div class="match-time">
+                            {{ match.datetime.strftime('%H:%M') if match.datetime else 'Время не указано' }}
+                        </div>
+                    </div>
+                    
+                    <div class="teams">
+                        <div class="team team1">
+                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team1|lower + '.png') }}" 
+                                 onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+                                 alt="{{ match.team1 }}">
+                            <span>{{ match.team1 }}</span>
+                        </div>
+                        <div class="vs">-</div>
+                        <div class="team team2">
+                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team2|lower + '.png') }}" 
+                                 onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+                                 alt="{{ match.team2 }}">
+                            <span>{{ match.team2 }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="match-actions">
+                        <a href="/miniapp/match/{{ match.id }}" class="btn match-detail-btn">Детали</a>
+                        <button class="subscribe-btn" data-match-id="{{ match.id }}">
+                            <i class="icon-bell"></i>
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 </div>
 {% endblock %}

@@ -1,85 +1,126 @@
-/* Анимация появления уведомления */
-@keyframes slideIn {
-    from { top: -100px; }
-    to { top: 20px; }
+/* Плавные переходы */
+* {
+    transition: all 0.3s ease;
 }
 
-.slide-in {
-    animation: slideIn 0.5s forwards;
+/* Анимация появления */
+.fade-in {
+    animation: fadeIn 0.5s ease forwards;
 }
 
-/* Анимация скрытия уведомления */
-@keyframes slideOut {
-    from { top: 20px; }
-    to { top: -100px; }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
-.slide-out {
-    animation: slideOut 0.5s forwards;
+/* Анимация загрузки */
+.loader {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(100, 255, 218, 0.3);
+    border-radius: 50%;
+    border-top-color: var(--accent);
+    animation: spin 1s ease-in-out infinite;
 }
 
-/* Анимация переворота табло */
-@keyframes flip {
-    0% { transform: rotateX(0); }
-    50% { transform: rotateX(90deg); }
-    100% { transform: rotateX(0); }
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
-.flip-animation {
-    animation: flip 0.8s ease-in-out;
+/* Плавные изменения размеров */
+.scale-hover:hover {
+    transform: scale(1.03);
 }
 
-/* Анимация перехода между страницами */
-.page-enter {
+/* Анимация бейджа достижения */
+.achievement-card {
     opacity: 0;
     transform: translateY(20px);
 }
 
-.page-enter-active {
+.achievement-card.show {
     opacity: 1;
     transform: translateY(0);
-    transition: all 0.3s ease;
+    transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
-.page-exit {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.page-exit-active {
+/* Анимация для табов */
+.tab-content {
     opacity: 0;
-    transform: translateY(-20px);
-    transition: all 0.3s ease;
-}
-/* Анимация переворота табло */
-@keyframes flip {
-    0% { transform: rotateX(0); }
-    50% { transform: rotateX(90deg); }
-    100% { transform: rotateX(0); }
+    transform: translateX(10px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-.flip-animation {
-    animation: flip 0.8s ease-in-out;
+.tab-content.active {
+    opacity: 1;
+    transform: translateX(0);
 }
 
-/* Анимация появления админ-панели */
+/* Анимация для нотификаций */
+.notification {
+    animation: slideIn 0.3s ease forwards;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Анимация для кнопки ежедневного чекина */
+.streak-day {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+.streak-day.show {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Анимация для топ-листа */
+.leaderboard-row {
+    opacity: 0;
+    transform: translateX(-10px);
+}
+
+.leaderboard-row.show {
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Анимация для товаров в магазине */
+.product-card {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+.product-card.show {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Анимация для элементов корзины */
+.cart-item {
+    opacity: 0;
+    transform: translateX(-10px);
+}
+
+.cart-item.show {
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Анимация для кнопки "Скопировать ссылку" */
+.copy-animation {
+    animation: pulse 0.5s ease;
+}
+
 @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-
-.admin-panel {
-    animation: pulse 2s ease-in-out;
-}
-
-/* Анимация кнопки подписки */
-@keyframes pulse-glow {
-    0% { box-shadow: 0 0 5px rgba(255, 107, 0, 0.5); }
-    50% { box-shadow: 0 0 20px rgba(255, 107, 0, 0.8); }
-    100% { box-shadow: 0 0 5px rgba(255, 107, 0, 0.5); }
-}
-
-.btn-subscribe {
-    animation: pulse-glow 2s infinite;
+    0% { background-color: var(--accent); color: var(--primary-bg); }
+    100% { background-color: var(--secondary-bg); color: var(--text); }
 }
