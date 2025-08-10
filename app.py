@@ -136,6 +136,25 @@ def init_db():
             )
         '''))
         
+        # Проверяем и добавляем недостающие колонки в таблицу matches
+        existing_columns = [row[0] for row in conn.execute(sql_text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'matches'
+        """))]
+        
+        if 'odds_team1' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE matches ADD COLUMN odds_team1 INTEGER DEFAULT 35"))
+            logger.info("Added 'odds_team1' column to matches table")
+        
+        if 'odds_team2' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE matches ADD COLUMN odds_team2 INTEGER DEFAULT 65"))
+            logger.info("Added 'odds_team2' column to matches table")
+        
+        if 'odds_draw' not in existing_columns:
+            conn.execute(sql_text("ALTER TABLE matches ADD COLUMN odds_draw INTEGER DEFAULT 0"))
+            logger.info("Added 'odds_draw' column to matches table")
+        
         # products table
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS products (
