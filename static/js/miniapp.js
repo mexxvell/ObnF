@@ -317,10 +317,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Таймаут для инициализации (максимум 10 секунд)
     const INIT_TIMEOUT = 10000;
     let initTimeoutId;
+    let progressInterval;
     
-    // Функция завершения инициализации
+    // ОБЪЕДИНЕННАЯ функция завершения инициализации (ОПРЕДЕЛЕНА ПЕРВОЙ!)
     const completeInitialization = (success = true) => {
         clearTimeout(initTimeoutId);
+        if (progressInterval) {
+            clearInterval(progressInterval);
+        }
         
         // Плавно скрываем экран загрузки
         if (loadingScreen) {
@@ -388,6 +392,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
+    // Обновление прогресс-бара
+    const progressBar = document.getElementById('loading-progress-bar');
+    let progress = 0;
+
+    const updateProgress = (value) => {
+        progress = Math.min(Math.max(progress, value), 100);
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+        }
+    };
+
     // Проверяем, доступен ли Telegram WebApp API
     const checkTelegramApi = () => {
         return new Promise((resolve) => {
@@ -512,95 +527,13 @@ document.addEventListener('DOMContentLoaded', () => {
         completeInitialization(false);
     }, INIT_TIMEOUT);
     
-	// Обновление прогресс-бара
-const progressBar = document.getElementById('loading-progress-bar');
-let progress = 0;
-
-const updateProgress = (value) => {
-    progress = Math.min(Math.max(progress, value), 100);
-    if (progressBar) {
-        progressBar.style.width = `${progress}%`;
-    }
-};
-
-// Имитация прогресса загрузки
-const progressInterval = setInterval(() => {
-    if (progress < 90) {
-        updateProgress(progress + 2);
-    }
-}, 300);
-
-// ОБЪЕДИНЕННАЯ функция завершения инициализации
-const completeInitialization = (success = true) => {
-    clearTimeout(initTimeoutId);
-    clearInterval(progressInterval);
-    updateProgress(100);
-    
-    // Плавно скрываем экран загрузки
-    if (loadingScreen) {
-        loadingScreen.style.opacity = '0';
-        setTimeout(() => {
-            if (loadingScreen) {
-                loadingScreen.style.display = 'none';
-            }
-            if (appContainer) {
-                appContainer.classList.remove('hidden');
-            }
-            if (frame && success) {
-                frame.style.display = 'block';
-            }
-        }, 500);
-    }
-    
-    if (success) {
-        // Настраиваем интерфейс
-        setupBottomMenu();
-        setupSideMenu();
-        setupLinkHandlers();
-        setupNavigation();
-        setupIframeHandler();
-        setupErrorHandlers();
-        
-        // Запускаем опрос уведомлений
-        pollNotifications();
-        pollInterval = setInterval(pollNotifications, 8000);
-        
-        // Устанавливаем активную вкладку
-        const activeTab = getActiveTabFromUrl();
-        setActiveTab(activeTab);
-        
-        // Загружаем содержимое активной вкладки
-        loadActiveTabContent(activeTab);
-    } else {
-        // Показываем уведомление об ошибке
-        showNotification('Не удалось инициализировать приложение. Проверьте соединение и перезагрузите страницу.', 'error');
-        
-        // Все равно показываем приложение, чтобы пользователь мог перезагрузить
-        if (appContainer) {
-            appContainer.classList.remove('hidden');
+    // Имитация прогресса загрузки
+    progressInterval = setInterval(() => {
+        if (progress < 90) {
+            updateProgress(progress + 2);
         }
-        
-        // Показываем сообщение об ошибке в основном контенте
-        if (frame) {
-            frame.style.display = 'block';
-            frame.src = 'about:blank';
-            frame.onload = function() {
-                const errorContent = `
-                    <div style="padding: 20px; text-align: center; color: #ff6b6b;">
-                        <h2>Ошибка инициализации</h2>
-                        <p>Не удалось загрузить приложение. Пожалуйста, перезагрузите страницу.</p>
-                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer;">
-                            Перезагрузить
-                        </button>
-                    </div>
-                `;
-                frame.contentDocument.open();
-                frame.contentDocument.write(errorContent);
-                frame.contentDocument.close();
-            };
-        }
-    }
-};
+    }, 300);
+    
     // Запускаем инициализацию
     initSessionWithCheck()
         .then(() => {
@@ -618,5 +551,8 @@ const completeInitialization = (success = true) => {
             clearInterval(pollInterval);
         }
         clearTimeout(initTimeoutId);
+        if (progressInterval) {
+            clearInterval(progressInterval);
+        }
     });
 });

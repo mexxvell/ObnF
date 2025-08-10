@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import json
+import traceback
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 
@@ -69,23 +70,20 @@ def init_db():
     with engine.connect() as conn:
         # users table
         conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS users (
-                id BIGINT PRIMARY KEY,
-                username TEXT,
-                display_name TEXT,
-                level INTEGER DEFAULT 1,
-                xp INTEGER DEFAULT 0,
-                coins INTEGER DEFAULT 0,
-                badges TEXT DEFAULT '',
-                referrer BIGINT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                banned_until TIMESTAMP,
-                full_name TEXT,
-                birth_date DATE,
-                favorite_club TEXT
-            )
-        '''))
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGINT PRIMARY KEY,
+        username TEXT,
+        display_name TEXT,
+        level INTEGER DEFAULT 1,
+        xp INTEGER DEFAULT 0,
+        coins INTEGER DEFAULT 0,
+        badges TEXT DEFAULT '',
+        referrer BIGINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        banned_until TIMESTAMP
+    )
+''').execution_options(autocommit=True))
         
         # Проверяем и добавляем недостающие колонки
         existing_columns = [row[0] for row in conn.execute(sql_text("""
@@ -930,7 +928,7 @@ def telegram_webhook():
 # --- Helpers ---
 def ensure_user_exists(user_id, username=None, display_name=None, referrer=None):
     with engine.begin() as conn:
-        r = conn.execute(sql_text("SELECT * FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        r = conn.execute(sql_text("SELECT * FROM users WHERE id = :id").bindparams(id=user_id)).fetchone()
         if not r:
             # Первый вход - даем 500 кредитов
             conn.execute(sql_text(
@@ -975,7 +973,7 @@ def ensure_user_exists(user_id, username=None, display_name=None, referrer=None)
 
 def get_user(user_id):
     with engine.connect() as conn:
-        row = conn.execute(sql_text("SELECT * FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+        row = conn.execute(sql_text("SELECT * FROM users WHERE id = :id").bindparams(id=user_id)).fetchone()
         if row:
             logger.debug(f"Найден пользователь: id={row.id}, username={row.username}")
         else:
