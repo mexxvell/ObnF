@@ -262,6 +262,62 @@ def miniapp_init():
         conn.commit()
     return jsonify({"success": True})
 
+@app.route('/miniapp/profile')
+def miniapp_profile():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return "Не авторизован", 403
+    return render_template('profile.html')
+
+@app.route('/miniapp/profile_api')
+def miniapp_profile_api():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauth"}), 403
+    with engine.connect() as conn:
+        row = conn.execute(sql_text("SELECT id, username, display_name, level, xp, badges, coins FROM users WHERE id = :id"),
+                           {"id": user_id}).fetchone()
+    if not row:
+        return jsonify({"error": "notfound"}), 404
+    return jsonify({
+        "id": row.id,
+        "username": row.username,
+        "display_name": row.display_name,
+        "level": row.level,
+        "xp": row.xp,
+        "badges": (row.badges or "").split(",") if row.badges else [],
+        "coins": row.coins
+    })
+
+@app.route('/miniapp/create_order', methods=['POST'])
+def miniapp_create_order():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"success": False, "error": "unauth"}), 403
+    data = request.json or {}
+    item = data.get('item')
+    price = int(data.get('price', 0))
+    if not item or price <= 0:
+        return jsonify({"success": False, "error": "invalid"}), 400
+    with engine.connect() as conn:
+        conn.execute(sql_text(
+            "INSERT INTO orders (user_id, item, price) VALUES (:uid, :item, :price)"
+        ), {"uid": user_id, "item": item, "price": price})
+        conn.commit()
+    return jsonify({"success": True})
+
+@app.route('/miniapp/support')
+def miniapp_support():
+    return render_template('support.html')
+
+@app.route('/miniapp/nlo')
+def miniapp_nlo():
+    return "<h2>НЛО 8х8 — скоро здесь будет контент!</h2>"
+
+@app.route('/miniapp/predictions')
+def miniapp_predictions():
+    return "<h2>Прогнозы на матчи — скоро здесь будет контент!</h2>"
+
 @app.route('/miniapp/home')
 def miniapp_home():
     user_id = session.get('user_id', 0)
