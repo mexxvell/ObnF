@@ -288,8 +288,8 @@ def miniapp_profile_api():
         "badges": (row.badges or "").split(",") if row.badges else [],
         "coins": row.coins
     })
-    
-    @app.route('/miniapp/standings')
+ 
+@app.route('/miniapp/standings')
 def miniapp_standings():
     if not gs_client:
         return "Google Sheets не настроен", 500
