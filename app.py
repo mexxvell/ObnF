@@ -470,19 +470,9 @@ def handle_start(message):
     user = message.from_user
     user_id = message.chat.id
     ensure_user_exists(user_id, user.username, f"{user.first_name} {user.last_name or ''}")
-    # build keyboard
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(types.KeyboardButton("⚽ Открыть приложение"))
-    kb.add(types.KeyboardButton("📅 Ближайшие матчи"), types.KeyboardButton("👤 Профиль"))
-    kb.add(types.KeyboardButton("🛍️ Магазин"), types.KeyboardButton("📢 Поддержка"))
-    kb.add(types.KeyboardButton("🔗 Пригласить друга"))
-    bot.send_message(user_id, "Добро пожаловать в Лигу! Открой приложение через кнопку ниже.", reply_markup=kb)
-
-@bot.message_handler(func=lambda m: m.text == "⚽ Открыть приложение")
-def open_app(message):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("Открыть мини-приложение", web_app=types.WebAppInfo(url=MINIAPP_URL)))
-    bot.send_message(message.chat.id, "Откройте приложение:", reply_markup=kb)
+    
+    # УБРАЛИ КЛАВИАТУРУ - просто отправляем сообщение
+    bot.send_message(user_id, "Добро пожаловать в Лигу! Нажмите кнопку 'Open' рядом со скрепкой.")
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Пригласить друга")
 def referral(message):

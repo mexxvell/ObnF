@@ -60,7 +60,9 @@
     </div>`;
     el.classList.remove('hidden');
     el.classList.add('pulse');
-    el.onclick = function(){ window.parent.location.href = '/miniapp/match/' + note.id; };
+    el.onclick = function() { 
+  document.getElementById('page-frame').src = '/miniapp/match/' + note.id; 
+};
   }
 
   function hideLiveBanner(){
@@ -97,14 +99,29 @@
     });
   }
 
-  // init all
-  document.addEventListener('DOMContentLoaded', ()=>{
-    initSession();
-    setupBurger();
-    setupTabs();
-    pollNotifications();
-    pollInterval = setInterval(pollNotifications, 8000);
+ function setupLinkHandlers() {
+  document.addEventListener('click', function(e) {
+    let target = e.target;
+    while (target && !target.href) {
+      target = target.parentElement;
+    }
+    
+    if (target && target.href && target.href.startsWith('https://football-league-app.onrender.com/miniapp')) {
+      e.preventDefault();
+      document.getElementById('page-frame').src = target.href;
+    }
   });
+}
+
+// Вызовите в DOMContentLoaded
+document.addEventListener('DOMContentLoaded', ()=>{
+  initSession();
+  setupBurger();
+  setupTabs();
+  setupLinkHandlers(); // Добавляем обработку ссылок
+  pollNotifications();
+  pollInterval = setInterval(pollNotifications, 8000);
+});
 
   // graceful cleanup
   window.addEventListener('beforeunload', ()=>{
