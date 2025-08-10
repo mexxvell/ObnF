@@ -246,7 +246,7 @@ if 'stock' not in existing_columns:
             )
         '''))
         # referrals table
-        conn.execute(sql_text('''
+    conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS referrals (
                 id SERIAL PRIMARY KEY,
                 referrer_id BIGINT,
