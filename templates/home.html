@@ -26,9 +26,9 @@
                     
                             <div class="teams">
                         <div class="team team1">
-                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team1|replace(' ', '').replace('.', '').lower() + '.png') }}" 
-                                 onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
-                                 alt="{{ match.team1 }}">
+                            <img src="{{ url_for('static', filename='images/team-logos/' + match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '') + '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team1 }}">
                             <span>{{ match.team1 }}</span>
                         </div>
                         <div class="vs">{{ match.score1 }} : {{ match.score2 }}</div>

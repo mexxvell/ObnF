@@ -1491,14 +1491,14 @@ def get_matches(round_number=None):
 def get_upcoming_matches():
     """Возвращает предстоящие матчи из Google Sheets"""
     matches = get_matches_from_sheets()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     upcoming = [m for m in matches if m["datetime"] > now]
     return upcoming[:10]  # Возвращаем первые 10 матчей
 
 def get_live_matches():
     """Возвращает текущие матчи из Google Sheets"""
     matches = get_matches_from_sheets()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     # Для демонстрации считаем, что матч "живой", если он начался в течение последнего часа
     live_matches = [m for m in matches if m["datetime"] <= now <= m["datetime"] + timedelta(hours=2)]
     return live_matches
@@ -1980,10 +1980,24 @@ def get_matches_from_sheets():
             
             # Формируем дату и время
             try:
-                # Формат даты в Google Sheets: "08.08.25"
-                # Преобразуем в формат "YYYY-MM-DD"
-                day, month, year = date_str.split('.')
-                year = "20" + year if len(year) == 2 else year
+                # Пытаемся определить формат даты
+                if '.' in date_str:
+                    # Формат "дд.мм.гг" или "дд.мм.гггг"
+                    parts = date_str.split('.')
+                    if len(parts) == 3:
+                        day = parts[0]
+                        month = parts[1]
+                        year = parts[2]
+                        if len(year) == 2:
+                            year = "20" + year
+                elif '-' in date_str:
+                    # Формат "гггг-мм-дд"
+                    parts = date_str.split('-')
+                    if len(parts) == 3:
+                        year = parts[0]
+                        month = parts[1]
+                        day = parts[2]
+                
                 date_time_str = f"{year}-{month}-{day}"
                 
                 if time_str:
@@ -1994,7 +2008,8 @@ def get_matches_from_sheets():
                     match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
                 else:
                     match_datetime = datetime.strptime(date_time_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing date '{date_str}': {e}")
                 continue
             
             # Определяем статус матча с учетом временной зоны
@@ -2101,6 +2116,24 @@ def start_match_sync():
 sync_thread = threading.Thread(target=start_match_sync, daemon=True)
 sync_thread.start()
 
+# Добавляем фильтр для форматирования даты в шаблонах
+@app.template_filter('datetime')
+def format_datetime(value, format='%d.%m.%Y %H:%M'):
+    """Форматирует объект datetime"""
+    if not value:
+        return ""
+    # Если значение уже строка, возвращаем как есть
+    if isinstance(value, str):
+        return value
+    try:
+        # Пытаемся преобразовать в datetime, если это строка
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        # Форматируем дату
+        return value.strftime(format)
+    except (TypeError, ValueError):
+        return str(value)
+        
 # --- Static helpers for rendering templates ---
 @app.context_processor
 def inject_now():

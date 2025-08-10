@@ -1376,8 +1376,18 @@ table tr:last-child td {
     display: none;
 }
 
-@keyframes pulse {
-    0% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.05); opacity: 0.8; }
-    100% { transform: scale(1); opacity: 1; }
+@keyframes logo-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+}
+
+.loading-logo img {
+    width: 120px;
+    height: 120px;
+    animation: logo-pulse 1.5s ease-in-out infinite;
+    border-radius: 50%;
+    object-fit: contain;
+    padding: 10px;
+    background-color: rgba(100, 255, 218, 0.1);
 }
