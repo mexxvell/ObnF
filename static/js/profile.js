@@ -28,8 +28,66 @@ function setupTabs() {
             tab.classList.add('active');
             const tabName = tab.dataset.tab;
             document.querySelector(`.profile-tab-content[data-tab-content="${tabName}"]`).classList.add('active');
+            
+            // Загружаем данные для вкладки, если это необходимо
+            if (tabName === 'achievements') {
+                loadAchievements();
+            } else if (tabName === 'referrals') {
+                loadReferralStats();
+            }
         });
     });
+}
+
+function loadAchievements() {
+    const container = document.querySelector('.achievements-grid');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loader"></div>';
+    
+    fetch('/miniapp/achievements')
+        .then(response => response.json())
+        .then(achievements => {
+            if (achievements.length === 0) {
+                container.innerHTML = '<p class="no-achievements">У вас пока нет достижений. Начните делать ставки и получайте награды!</p>';
+                return;
+            }
+            
+            let html = '';
+            achievements.forEach(achievement => {
+                html += `
+                    <div class="achievement-card ${achievement.tier}">
+                        <div class="achievement-icon">
+                            ${getAchievementIcon(achievement.tier)}
+                        </div>
+                        <div class="achievement-info">
+                            <h4>${achievement.name}</h4>
+                            <p>${achievement.description}</p>
+                            <span class="achievement-date">${achievement.achieved_at}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error loading achievements:', error);
+            container.innerHTML = '<p class="error">Ошибка загрузки достижений</p>';
+        });
+}
+
+function getAchievementIcon(tier) {
+    switch(tier) {
+        case 'bronze':
+            return '<i class="icon-achievement-bronze">🥉</i>';
+        case 'silver':
+            return '<i class="icon-achievement-silver">🥈</i>';
+        case 'gold':
+            return '<i class="icon-achievement-gold">🥇</i>';
+        default:
+            return '<i class="icon-achievement">⭐</i>';
+    }
 }
 
 function setupDailyCheckin() {
@@ -125,6 +183,63 @@ function showNotification(message, type = 'info') {
             <span class="toast-message">${message}</span>
         </div>
     `;
+	
+	function setupProfileEdit() {
+    const saveBtn = document.getElementById('save-profile-btn');
+    if (!saveBtn) return;
+    
+    saveBtn.addEventListener('click', () => {
+        const fullName = document.getElementById('full_name').value;
+        const birthDate = document.getElementById('birth_date').value;
+        const favoriteClub = document.getElementById('favorite_club').value;
+        
+        // Валидация
+        if (!fullName.trim()) {
+            showNotification('Пожалуйста, введите ФИО', 'error');
+            return;
+        }
+        
+        // Отправка данных
+        fetch('/miniapp/profile/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                full_name: fullName,
+                birth_date: birthDate,
+                favorite_club: favoriteClub
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('Профиль успешно обновлен', 'success');
+                
+                // Через 1.5 секунды возвращаемся на страницу профиля
+                setTimeout(() => {
+                    window.location.href = '/miniapp/profile';
+                }, 1500);
+            } else {
+                showNotification('Ошибка при сохранении профиля', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving profile:', error);
+            showNotification('Произошла ошибка. Попробуйте позже.', 'error');
+        });
+    });
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    // ... существующий код ...
+    
+    // Если это страница редактирования профиля, настраиваем форму
+    if (document.querySelector('.profile-edit-page')) {
+        setupProfileEdit();
+    }
+});
     
     document.body.appendChild(toast);
     

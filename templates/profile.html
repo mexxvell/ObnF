@@ -6,19 +6,24 @@
             <span class="avatar-initials">{{ user.display_name[0:2] }}</span>
         </div>
         <h1>{{ user.display_name }}</h1>
-        <div class="user-stats">
-            <div class="stat-item">
-                <span class="stat-value">{{ user.level }}</span>
-                <span class="stat-label">Уровень</span>
+		        <a href="/miniapp/profile/edit" class="edit-profile-btn">✎</a>
+            <div class="user-stats">
+        <div class="stat-item full-width">
+            <div class="level-bar">
+                <div class="level-progress" style="width: {{ (user.xp % 100) }}%"></div>
+                <div class="level-info">
+                    <span class="level-text">Уровень {{ user.level }}</span>
+                    <span class="xp-text">{{ user.xp % 100 }} / 100 XP</span>
+                </div>
             </div>
-            <div class="stat-item">
-                <span class="stat-value">{{ user.xp }}</span>
-                <span class="stat-label">XP</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-value">{{ user.coins }}</span>
-                <span class="stat-label">Кредиты</span>
-            </div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-value">{{ user.coins }}</span>
+            <span class="stat-label">Кредиты</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-value">{{ stats.total_bets }}</span>
+            <span class="stat-label">Ставок</span>
         </div>
     </div>
     

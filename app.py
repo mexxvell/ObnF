@@ -227,7 +227,7 @@ if 'stock' not in existing_columns:
     logger.info("Added 'stock' column to products table")
     
         # cart table
-        conn.execute(sql_text('''
+    conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS cart (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
@@ -237,7 +237,7 @@ if 'stock' not in existing_columns:
             )
         '''))
         # achievements table
-        conn.execute(sql_text('''
+    conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS achievements (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
@@ -473,6 +473,74 @@ def miniapp_profile():
     except Exception as e:
         logger.error(f"Ошибка при загрузке профиля для user_id={user_id}: {str(e)}", exc_info=True)
         return "Internal server error", 500
+        
+        @app.route('/miniapp/profile/edit', methods=['GET'])
+def miniapp_profile_edit():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return "Not authorized", 403
+    
+    user = get_user(user_id)
+    
+    # Получаем список команд из Google Sheets
+    clubs = []
+    if gs_client and sheet:
+        try:
+            ws = sheet.worksheet("ТАБЛИЦА")
+            # Получаем названия команд из столбца B, строки 2-10
+            for i in range(2, 11):
+                club = ws.cell(i, 2).value  # Столбец B - индекс 2
+                if club:
+                    clubs.append(club)
+        except Exception as e:
+            logger.error(f"Error getting clubs from Google Sheets: {e}")
+    
+    return render_template('profile_edit.html', 
+                          user=user, 
+                          clubs=clubs,
+                          user_id=user_id)
+
+@app.route('/miniapp/profile/save', methods=['POST'])
+def miniapp_profile_save():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 403
+    
+    data = request.json
+    full_name = data.get('full_name', '')
+    birth_date = data.get('birth_date', '')
+    favorite_club = data.get('favorite_club', '')
+    
+    try:
+        with engine.begin() as conn:
+            # Преобразуем дату в правильный формат
+            birth_date_formatted = None
+            if birth_date:
+                try:
+                    # Пытаемся преобразовать дату в формат YYYY-MM-DD
+                    birth_date_obj = datetime.strptime(birth_date, "%Y-%m-%d")
+                    birth_date_formatted = birth_date_obj.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+            
+            # Обновляем профиль
+            conn.execute(sql_text("""
+                UPDATE users 
+                SET full_name = :full_name, 
+                    birth_date = :birth_date, 
+                    favorite_club = :favorite_club
+                WHERE id = :user_id
+            """), {
+                "full_name": full_name,
+                "birth_date": birth_date_formatted,
+                "favorite_club": favorite_club,
+                "user_id": user_id
+            })
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error saving profile: {e}")
+        return jsonify({"error": "server_error"}), 500
 
 @app.route('/miniapp/profile_api')
 def miniapp_profile_api():
@@ -499,6 +567,21 @@ def miniapp_profile_api():
         "stats": stats,
         "achievements": achievements
     })
+    
+@app.route('/miniapp/achievements')
+def miniapp_achievements():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 403
+    
+    achievements = get_user_achievements(user_id)
+    return jsonify([{
+        "id": a.achievement_id,
+        "name": a.name,
+        "description": a.description,
+        "tier": a.tier,
+        "achieved_at": format_datetime(a.achieved_at)
+    } for a in achievements])
 
 @app.route('/miniapp/shop')
 def miniapp_shop():
@@ -1146,7 +1229,7 @@ def get_user_achievements(user_id):
     """Возвращает достижения пользователя"""
     with engine.connect() as conn:
         rows = conn.execute(sql_text("""
-            SELECT a.achievement_id, a.achieved_at, 
+            SELECT a.achievement_id, a.achieved_at,
                    CASE a.achievement_id
                        WHEN 'level_10' THEN 'Начинающий'
                        WHEN 'level_25' THEN 'Опытный'
@@ -1160,15 +1243,11 @@ def get_user_achievements(user_id):
                        WHEN 'referral_100' THEN 'Влиятельный'
                        WHEN 'win_10' THEN 'Удачливый'
                        WHEN 'win_30' THEN 'Везунчик'
-                       WHEN 'win_50' THEN 'Фаворит фортуны'
-                       WHEN 'comment_50' THEN 'Активный'
-                       WHEN 'comment_200' THEN 'Комментатор'
-                       WHEN 'comment_500' THEN 'Эксперт'
+                       WHEN 'win_100' THEN 'Победитель'
                        WHEN 'daily_7' THEN 'Последовательный'
                        WHEN 'daily_30' THEN 'Преданный'
                        WHEN 'daily_100' THEN 'Настоящий фанат'
-                       WHEN 'bet_placed' THEN 'Новичок'
-                       ELSE 'Неизвестное достижение'
+                       ELSE a.achievement_id
                    END as name,
                    CASE a.achievement_id
                        WHEN 'level_10' THEN 'Достиг 10 уровня'
@@ -1181,41 +1260,33 @@ def get_user_achievements(user_id):
                        WHEN 'referral_5' THEN 'Пригласил 5 друзей'
                        WHEN 'referral_20' THEN 'Пригласил 20 друзей'
                        WHEN 'referral_100' THEN 'Пригласил 100 друзей'
-                       WHEN 'win_10' THEN 'Выиграл 10 ставок подряд'
-                       WHEN 'win_30' THEN 'Выиграл 30 ставок подряд'
-                       WHEN 'win_50' THEN 'Выиграл 50 ставок подряд'
-                       WHEN 'comment_50' THEN 'Оставил 50 комментариев'
-                       WHEN 'comment_200' THEN 'Оставил 200 комментариев'
-                       WHEN 'comment_500' THEN 'Оставил 500 комментариев'
+                       WHEN 'win_10' THEN 'Выиграл 10 ставок'
+                       WHEN 'win_30' THEN 'Выиграл 30 ставок'
+                       WHEN 'win_100' THEN 'Выиграл 100 ставок'
                        WHEN 'daily_7' THEN '7 дней подряд заходил в приложение'
                        WHEN 'daily_30' THEN '30 дней подряд заходил в приложение'
                        WHEN 'daily_100' THEN '100 дней подряд заходил в приложение'
-                       WHEN 'bet_placed' THEN 'Сделал первую ставку'
                        ELSE 'Неизвестное достижение'
                    END as description,
-                   CASE 
-                       WHEN a.achievement_id LIKE 'level_%' OR 
-                            a.achievement_id LIKE 'bet_%' OR 
-                            a.achievement_id LIKE 'referral_%' OR
-                            a.achievement_id = 'bet_placed' THEN 'bronze'
-                       WHEN a.achievement_id LIKE 'win_%' OR 
-                            a.achievement_id LIKE 'comment_%' OR
-                            a.achievement_id LIKE 'daily_7' THEN 'silver'
-                       ELSE 'gold'
+                   CASE
+                       WHEN a.achievement_id LIKE 'level_%' THEN 'gold'
+                       WHEN a.achievement_id LIKE 'bet_%' THEN 'silver'
+                       WHEN a.achievement_id LIKE 'referral_%' THEN 'bronze'
+                       WHEN a.achievement_id LIKE 'win_%' THEN 'silver'
+                       WHEN a.achievement_id LIKE 'daily_%' THEN 'bronze'
+                       ELSE 'bronze'
                    END as tier
             FROM achievements a
             WHERE a.user_id = :user_id
             ORDER BY a.achieved_at DESC
-        """), {
-            "user_id": user_id
-        }).fetchall()
+        """), {"user_id": user_id}).fetchall()
     
     return [{
-        "id": r.achievement_id,
+        "achievement_id": r.achievement_id,
         "name": r.name,
         "description": r.description,
         "tier": r.tier,
-        "achieved_at": str(r.achieved_at)
+        "achieved_at": format_datetime(r.achieved_at)
     } for r in rows]
 
 def current_online_counts():
