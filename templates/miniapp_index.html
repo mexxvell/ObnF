@@ -50,3 +50,38 @@
     </div>
 </div>
 {% endblock %}
+
+{% block extra_js %}
+<script>
+// Добавим отладочную информацию в консоль браузера
+console.log('[TEMPLATE] miniapp_index.html loaded');
+
+// Проверим, загрузился ли Telegram WebApp API
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[TEMPLATE] DOMContentLoaded event in template');
+    
+    // Проверяем наличие Telegram WebApp API
+    if (typeof window.Telegram !== 'undefined' && typeof window.Telegram.WebApp !== 'undefined') {
+        console.log('[TEMPLATE] Telegram WebApp API is available');
+    } else {
+        console.warn('[TEMPLATE] Telegram WebApp API is not available');
+    }
+    
+    // Проверяем, загрузился ли основной скрипт
+    if (typeof initializeApp === 'function') {
+        console.log('[TEMPLATE] initializeApp function is available');
+    } else {
+        console.warn('[TEMPLATE] initializeApp function is not available');
+        // Попробуем вызвать инициализацию вручную, если она не запустилась автоматически
+        if (typeof initializeApp !== 'undefined') {
+            console.log('[TEMPLATE] Trying to call initializeApp manually');
+            try {
+                initializeApp();
+            } catch (e) {
+                console.error('[TEMPLATE] Error calling initializeApp manually:', e);
+            }
+        }
+    }
+});
+</script>
+{% endblock %}
