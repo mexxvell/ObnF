@@ -241,6 +241,11 @@ table tr:last-child td {
     border-bottom: none;
 }
 
+/* Для таблицы матчей */
+.matches-table .match-date-time {
+    font-size: 0.95em !important;
+}
+
 /* Вкладки */
 .tabs {
     display: flex;
@@ -307,11 +312,9 @@ table tr:last-child td {
 }
 
 .match-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 12px;
-    color: var(--text-secondary);
-    font-size: 14px;
+    justify-content: center !important;
+    text-align: center !important;
+    margin-bottom: 12px !important;
 }
 
 .teams {
@@ -329,13 +332,25 @@ table tr:last-child td {
 }
 
 .team img {
-    width: 40px;
-    height: 40px;
-    border-radius: 0;
+    width: 50px; /* Увеличено с 40px до 50px */
+    height: 50px; /* Увеличено с 40px до 50px */
+    border-radius: 0; /* Убрано скругление (круглый квадрат) */
     object-fit: contain; /* Изменено с cover на contain */
     margin-bottom: 6px;
-    background-color: #ddd;
+    background-color: transparent; /* Изменено с #ddd на прозрачный */
     padding: 2px;
+}
+
+/* Для случаев, когда логотипы имеют прозрачный фон */
+.team img {
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* Для случаев, когда логотипы имеют темный фон */
+@media (prefers-color-scheme: dark) {
+    .team img {
+        filter: brightness(1.2);
+    }
 }
 
 .team span {
@@ -1543,24 +1558,23 @@ table tr:last-child td {
     margin-bottom: 16px !important;
 }
 
-/* Стилизация даты и времени матчей */
-.match-header {
-    justify-content: center !important;
-    text-align: center !important;
+
+/* Удаляем отдельные стили для .match-date и .match-time */
+.match-date, .match-time {
+    display: none;
 }
 
-.match-header .match-date, 
-.match-header .match-time,
-.match-header .match-date-time {
-    text-align: center !important;
-    width: 100% !important;
+/* Добавляем стиль для объединенной строки */
+.match-date-time {
     font-weight: 600 !important;
     font-size: 1.1em !important;
-    margin-bottom: 8px !important;
+    color: var(--text) !important;
+    text-align: center !important;
+    width: 100% !important;
 }
 
 /* Для таблицы матчей (если используется) */
-.matches-list .match-header {
+.matches-list {
     flex-direction: column !important;
     align-items: center !important;
 }
@@ -1582,4 +1596,18 @@ table tr:last-child td {
 .page-frame.loading {
     opacity: 0.7;
     transform: scale(0.98);
+}
+
+/* Удаляем белый фон и увеличиваем размер */
+.team-logo {
+    background-color: transparent; /* Убираем белый фон */
+    width: 50px;
+    height: 50px;
+    object-fit: contain; /* Сохраняем пропорции */
+    margin: 0 auto; /* Центрируем */
+}
+
+/* Для случаев, когда логотипы находятся внутри контейнеров */
+.team-container {
+    text-align: center;
 }

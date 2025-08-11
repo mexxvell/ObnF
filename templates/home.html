@@ -16,13 +16,10 @@
                 {% for match in round.matches %}
                 <div class="match-card">
                     <div class="match-header">
-                        <div class="match-date">
-                            {{ match.datetime.strftime('%d.%m.%Y') if match.datetime else 'Дата не указана' }}
-                        </div>
-                        <div class="match-time">
-                            {{ match.datetime.strftime('%H:%M') if match.datetime else 'Время не указано' }}
-                        </div>
-                    </div>
+    <div class="match-date-time">
+        {{ match.datetime.strftime('%d.%m.%Y %H:%M') if match.datetime else 'Дата и время не указаны' }}
+    </div>
+</div>
                     
                             <div class="teams">
                         <div class="team team1">

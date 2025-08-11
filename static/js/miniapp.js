@@ -486,36 +486,64 @@ document.addEventListener('DOMContentLoaded', () => {
             setActiveTab('home');
             
             // Добавляем обработчик для кнопок "Детали" после загрузки страницы
-            setTimeout(() => {
-                try {
-                    const detailsButtons = frame.contentDocument.querySelectorAll('.details-btn, .match-detail-btn');
-                    detailsButtons.forEach(btn => {
-                        btn.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            
-                            // Получаем ID матча из атрибута data-match-id или из URL
-                            const matchId = btn.dataset.matchId || 
-                                          (btn.closest('.match-card')?.dataset.matchId) ||
-                                          (btn.closest('tr')?.dataset.matchId);
-                            
-                            if (matchId) {
-                                console.log('[MATCH] Opening details for match ID:', matchId);
-                                // Загружаем страницу матча
-                                document.getElementById('page-frame').src = `/miniapp/match/${matchId}`;
-                                
-                                // Закрываем боковое меню, если открыто
-                                document.getElementById('side-menu')?.classList.add('hidden');
-                            } else {
-                                console.error('[MATCH] Match ID not found');
-                                showNotification('Ошибка: не удалось определить матч', 'error');
-                            }
-                        });
-                    });
-                } catch (iframeError) {
-                    console.error('[IFRAME] Error adding details button handlers:', iframeError);
+setTimeout(() => {
+    try {
+        const detailsButtons = frame.contentDocument.querySelectorAll('.details-btn, .match-detail-btn');
+        detailsButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Пытаемся найти ID матча разными способами
+                let matchId = null;
+                
+                // 1. Проверяем атрибут data-match-id кнопки
+                if (btn.dataset.matchId) {
+                    matchId = btn.dataset.matchId;
+                    console.log('[MATCH] Found match ID from button:', matchId);
                 }
-            }, 500); // Задержка для полной загрузки содержимого iframe
+                // 2. Проверяем родительский элемент .match-card
+                else if (btn.closest('.match-card')?.dataset.matchId) {
+                    matchId = btn.closest('.match-card').dataset.matchId;
+                    console.log('[MATCH] Found match ID from .match-card:', matchId);
+                }
+                // 3. Проверяем родительский элемент tr (для таблицы)
+                else if (btn.closest('tr')?.dataset.matchId) {
+                    matchId = btn.closest('tr').dataset.matchId;
+                    console.log('[MATCH] Found match ID from tr:', matchId);
+                }
+                // 4. Проверяем атрибут href (если кнопка является ссылкой)
+                else if (btn.href && /\/match\/(\d+)/.test(btn.href)) {
+                    matchId = btn.href.match(/\/match\/(\d+)/)[1];
+                    console.log('[MATCH] Found match ID from href:', matchId);
+                }
+                // 5. Проверяем скрытое поле в форме
+                else {
+                    const hiddenInput = btn.closest('form')?.querySelector('input[name="match_id"]');
+                    if (hiddenInput && hiddenInput.value) {
+                        matchId = hiddenInput.value;
+                        console.log('[MATCH] Found match ID from hidden input:', matchId);
+                    }
+                }
+                
+                if (matchId) {
+                    console.log('[MATCH] Opening details for match ID:', matchId);
+                    // Загружаем страницу матча
+                    document.getElementById('page-frame').src = `/miniapp/match/${matchId}`;
+                    
+                    // Закрываем боковое меню, если открыто
+                    document.getElementById('side-menu')?.classList.add('hidden');
+                } else {
+                    console.error('[MATCH] Match ID not found after all attempts');
+                    showNotification('Ошибка: не удалось определить матч. Пожалуйста, обновите страницу и попробуйте снова.', 'error');
+                }
+            });
+        });
+    } catch (iframeError) {
+        console.error('[IFRAME] Error adding details button handlers:', iframeError);
+    }
+}, 500);
+			
         } else if (src.includes('/miniapp/nlo')) {
             setActiveTab('nlo');
         } else if (src.includes('/miniapp/predictions') || 

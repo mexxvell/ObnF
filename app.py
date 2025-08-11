@@ -2417,6 +2417,35 @@ def miniapp_notifications():
         "event": n.event,
         "created_at": str(n.created_at)
     } for n in notifications])
+    
+@app.route('/miniapp/match/<int:match_id>')
+def match_detail(match_id):
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return "Not authorized", 403
+    
+    match = get_match(match_id)
+    if not match:
+        return "Match not found", 404
+    
+    # Получаем информацию о команде
+    team_form1 = get_team_form(match.team1)
+    team_form2 = get_team_form(match.team2)
+    players1 = get_team_players(match.team1)
+    players2 = get_team_players(match.team2)
+    
+    # Проверяем подписку пользователя
+    is_subscribed = is_subscribed_to_match(user_id, match_id)
+    
+    return render_template('match_detail.html', 
+                          match=match,
+                          team_form1=team_form1,
+                          team_form2=team_form2,
+                          players1=players1,
+                          players2=players2,
+                          is_subscribed=is_subscribed,
+                          user_id=user_id,
+                          owner_id=OWNER_ID)
 
 @app.route('/miniapp/support')
 def miniapp_support():
