@@ -1,63 +1,6 @@
 // miniapp.js — основной скрипт для Telegram WebApp
 
 (function() {
-    // Инициализация Telegram WebApp
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    tg.ready();
-    
-    // Инициализация сессии
-async function initSession() {
-    try {
-        const tg = window.Telegram.WebApp;
-        const user = tg.initDataUnsafe?.user || null;
-        if (!user) {
-            console.error("User data not available from Telegram");
-            throw new Error("User data not available");
-        }
-        
-        // Сохраняем реферальный параметр
-        const urlParams = new URLSearchParams(window.location.search);
-        const ref = urlParams.get('ref');
-        
-        // Отправляем данные на сервер
-        const payload = {
-            user_id: user.id,
-            username: user.username || "",
-            display_name: `${user.first_name} ${user.last_name || ""}`,
-            ref: ref
-        };
-        
-        const response = await fetch('/miniapp/init', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-            throw new Error(`Server responded with status ${response.status}`);
-        }
-        
-        const data = await response.json();
-        if (data.success) {
-            console.log('Session initialized');
-            // Обновляем информацию о пользователе
-            const userMini = document.getElementById('user-mini');
-            if (userMini) {
-                userMini.textContent = user.first_name || 'Пользователь';
-            }
-            return true;
-        } else {
-            throw new Error(data.error || 'Session initialization failed');
-        }
-    } catch (error) {
-        console.error('Error initializing session:', error);
-        throw error; // Пробрасываем ошибку дальше
-    }
-}
-    
     // Установка активной вкладки
     function setActiveTab(tabName) {
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -326,21 +269,25 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(progressInterval);
         }
         
-        // Плавно скрываем экран загрузки
+        console.log('Completing initialization with success:', success);
+// Плавно скрываем экран загрузки
+if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    setTimeout(() => {
+        console.log('Hiding loading screen');
         if (loadingScreen) {
-            loadingScreen.style.opacity = '0';
-            setTimeout(() => {
-                if (loadingScreen) {
-                    loadingScreen.style.display = 'none';
-                }
-                if (appContainer) {
-                    appContainer.classList.remove('hidden');
-                }
-                if (frame && success) {
-                    frame.style.display = 'block';
-                }
-            }, 500);
+            loadingScreen.style.display = 'none';
         }
+        if (appContainer) {
+            console.log('Showing app container');
+            appContainer.classList.remove('hidden');
+        }
+        if (frame && success) {
+            console.log('Showing frame');
+            frame.style.display = 'block';
+        }
+    }, 500);
+}
         
         if (success) {
             // Настраиваем интерфейс
@@ -395,6 +342,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Обновление прогресс-бара
     const progressBar = document.getElementById('loading-progress-bar');
     let progress = 0;
+	let retryCount = 0;
+	const MAX_RETRIES = 3;
 
     const updateProgress = (value) => {
         progress = Math.min(Math.max(progress, value), 100);
@@ -406,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Проверяем, доступен ли Telegram WebApp API
     const checkTelegramApi = () => {
         return new Promise((resolve) => {
-            const maxAttempts = 20;
+            const maxAttempts = 50;
             let attempts = 0;
             
             const check = () => {
@@ -458,19 +407,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 ref: ref
             };
             
-            const response = await fetch('/miniapp/init', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Server responded with status ${response.status}`);
-            }
-            
-            const data = await response.json();
+            let response;
+try {
+    response = await fetch('/miniapp/init', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+} catch (fetchError) {
+    if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        console.log(`Retry ${retryCount}/${MAX_RETRIES} for init...`);
+        updateProgress(progress + 10); // +10% за retry
+        return initSessionWithCheck(); // Рекурсивный retry
+    }
+    throw fetchError;
+}
+
+if (!response.ok) {
+    throw new Error(`Server responded with status ${response.status}`);
+}
+
+	const data = await response.json();
             if (data.success) {
                 console.log('Session initialized');
                 // Обновляем информацию о пользователе
@@ -528,11 +488,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }, INIT_TIMEOUT);
     
     // Имитация прогресса загрузки
-    progressInterval = setInterval(() => {
-        if (progress < 90) {
-            updateProgress(progress + 2);
-        }
-    }, 300);
+progressInterval = setInterval(() => {
+    if (progress < 100) {
+        updateProgress(progress + 2);
+    }
+}, 300);
     
     // Запускаем инициализацию
     initSessionWithCheck()
