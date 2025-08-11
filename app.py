@@ -1446,7 +1446,7 @@ def get_user_achievements(user_id):
         "achieved_at": format_datetime(r.achieved_at)
     } for r in rows]
     
-    def set_user_favorite_club(user_id, club_name):
+def set_user_favorite_club(user_id, club_name):
     """Устанавливает любимый клуб пользователя"""
     with engine.begin() as conn:
         # Проверяем, существует ли запись
