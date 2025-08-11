@@ -535,17 +535,19 @@ def miniapp_profile():
     if not user_id:
         logger.warning("Попытка доступа к профилю без user_id в сессии")
         return "Not authorized", 403
-        # Проверка существования таблицы favorite_clubs
-with engine.connect() as check_conn:
-    table_exists = check_conn.execute(sql_text("""
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name = 'favorite_clubs'
-        )
-    """)).scalar()
-    if not table_exists:
-        logger.error("Таблица favorite_clubs не существует в БД!")
+    
+    # Проверка существования таблицы favorite_clubs
+    with engine.connect() as check_conn:
+        table_exists = check_conn.execute(sql_text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'favorite_clubs'
+            )
+        """)).scalar()
+        if not table_exists:
+            logger.error("Таблица favorite_clubs не существует в БД!")
+    
     logger.info(f"Запрос профиля для user_id={user_id}")
     try:
         user = get_user(user_id)
