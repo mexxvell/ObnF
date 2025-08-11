@@ -265,13 +265,6 @@ def init_db():
             logger.error(f"Error creating favorite_clubs table: {e}")
 
 init_db()
-# Принудительная синхронизация после инициализации БД
-if GS_ENABLED:
-    try:
-        sync_favorite_clubs_to_sheets()
-        logger.info("Forced initial sync of favorite clubs to Google Sheets")
-    except Exception as e:
-        logger.error(f"Error during initial sync to Google Sheets: {e}")
 
 # --- gspread (Google Sheets) setup ---
 gs_client = None
@@ -2687,7 +2680,22 @@ try:
     sync_matches_to_db()
 except Exception as e:
     logger.error(f"Error during initial match sync: {e}")
-
+    
+# === Инициализация приложения ===
+if __name__ == '__main__':
+    # Принудительная синхронизация после инициализации БД
+    if GS_ENABLED:
+        try:
+            sync_favorite_clubs_to_sheets()
+            logger.info("Forced initial sync of favorite clubs to Google Sheets")
+        except Exception as e:
+            logger.error(f"Error during initial sync to Google Sheets: {e}")
+    
+    # Синхронизируем матчи из Google Sheets с базой данных
+    try:
+        sync_matches_to_db()
+    except Exception as e:
+        logger.error(f"Error during initial match sync: {e}")
 # Запускаем периодическую синхронизацию
 def start_match_sync():
     while True:
