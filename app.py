@@ -7,6 +7,7 @@ import json
 import traceback
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+from google.auth.transport.requests import Request
 
 from flask import Flask, request, render_template, jsonify, session, redirect, url_for
 import telebot
