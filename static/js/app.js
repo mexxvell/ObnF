@@ -1,10 +1,3 @@
-// static/js/app.js
-/**
- * НЛО — Футбольная Лига
- * Основной JavaScript для Telegram Web App
- * Версия: 1.0
- */
-
 document.addEventListener('DOMContentLoaded', () => {
     // Инициализация Telegram WebApp
     if (window.Telegram && Telegram.WebApp) {
@@ -19,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPage: 'splash',
         userData: null,
         matches: [],
-        achievements: {}
+        achievements: {}  // Добавлено для хранения данных об ачивках
     };
 
     // Загрузка данных пользователя
@@ -27,11 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const urlParams = new URLSearchParams(window.location.search);
             app.userId = urlParams.get('user_id') || '123456';
+            console.log(`Загрузка данных для пользователя: ${app.userId}`);
             
             const response = await fetch(`/api/profile?user_id=${app.userId}`);
-            if (!response.ok) throw new Error('Не удалось загрузить профиль');
+            if (!response.ok) throw new Error(`Ошибка загрузки профиля: ${response.status}`);
             
             app.userData = await response.json();
+            console.log('Данные профиля загружены:', app.userData);
             return true;
         } catch (error) {
             console.error('Ошибка загрузки данных:', error);
@@ -43,11 +38,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Загрузка матчей
     const loadMatches = async () => {
         try {
+            console.log('Загрузка матчей...');
             const response = await fetch('/api/matches');
-            if (!response.ok) throw new Error('Не удалось загрузить матчи');
+            if (!response.ok) throw new Error(`Ошибка загрузки матчей: ${response.status}`);
             
             const data = await response.json();
-            app.matches = data.matches;
+            app.matches = data.matches || [];
+            console.log('Матчи загружены:', app.matches);
             return true;
         } catch (error) {
             console.error('Ошибка загрузки матчей:', error);
@@ -56,175 +53,303 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Загрузка данных об ачивках
+    const loadAchievements = async () => {
+        try {
+            console.log('Загрузка данных об ачивках...');
+            const response = await fetch('/static/achievements.json');
+            if (!response.ok) throw new Error('Не удалось загрузить ачивки');
+            
+            app.achievements = await response.json();
+            console.log('Данные об ачивках загружены');
+            return true;
+        } catch (error) {
+            console.error('Ошибка загрузки ачивок:', error);
+            // Создаем минимальные данные об ачивках для работы приложения
+            app.achievements = {
+                "bets_made": {
+                    "title": "Новичок прогноза",
+                    "description": "Сделайте 10 ставок",
+                    "image_paths": {
+                        "bronze": "bets_bronze.png",
+                        "silver": "bets_silver.png",
+                        "gold": "bets_gold.png"
+                    }
+                }
+                // Другие ачивки будут добавлены при успешной загрузке
+            };
+            console.warn('Используются минимальные данные об ачивках');
+            return true;
+        }
+    };
+
     // Инициализация приложения
     const initApp = async () => {
+        console.log('Инициализация приложения...');
         showPage('splash');
         
-        // Загружаем данные
-        const userDataLoaded = await loadUserData();
-        const matchesLoaded = await loadMatches();
-        
-        // Если все загружено - переходим к основному экрану
-        if (userDataLoaded && matchesLoaded) {
+        try {
+            // Загружаем данные
+            await loadUserData();
+            await loadMatches();
+            await loadAchievements();
+            
+            // Рендерим данные
             renderProfile();
             renderMatches();
-            setTimeout(() => showPage('main'), 2000); // Показ splash 2 секунды
-        } else {
-            setTimeout(() => showPage('main'), 2000); // Даже при ошибках показываем интерфейс
+            
+            // Переходим к основному экрану
+            console.log('Переключение на основной экран');
+            showPage('main');
+        } catch (error) {
+            console.error('Критическая ошибка инициализации:', error);
+            showNotification('Ошибка загрузки данных. Попробуйте позже.', 'error');
+            // Даже при ошибках показываем интерфейс
+            showPage('main');
         }
     };
 
     // Отображение страницы
     const showPage = (pageId) => {
+        console.log(`Показ страницы: ${pageId}`);
         document.querySelectorAll('.page').forEach(page => {
             page.classList.remove('active');
         });
         
-        document.getElementById(pageId).classList.add('active');
-        app.currentPage = pageId;
-        
-        // Анимация для профиля
-        if (pageId === 'profile') {
-            animateProgressBar();
+        const newPage = document.getElementById(pageId);
+        if (newPage) {
+            newPage.classList.add('active');
+            app.currentPage = pageId;
+            
+            // Анимация для профиля
+            if (pageId === 'profile') {
+                animateProgressBar();
+            }
+        } else {
+            console.error(`Страница не найдена: ${pageId}`);
+            showPage('main'); // Возвращаемся на главную
         }
     };
 
-    // Рендер профиля
+    // Рендер профиля с обработкой ошибок
     const renderProfile = () => {
-        if (!app.userData) return;
-        
-        // Обновляем данные профиля
-        document.getElementById('profile-username').textContent = 
-            app.userData.display_name || app.userData.username;
-        
-        document.getElementById('profile-credits').textContent = 
-            app.userData.credits.toLocaleString();
-        
-        document.getElementById('profile-level').textContent = 
-            `Уровень ${app.userData.level}`;
-        
-        document.getElementById('profile-xp-current').textContent = 
-            app.userData.xp;
-        
-        document.getElementById('profile-xp-needed').textContent = 
-            app.userData.next_level_xp;
-        
-        // Обновляем прогресс-бар
-        const progress = (app.userData.xp / app.userData.next_level_xp) * 100;
-        document.getElementById('xp-progress').style.width = `${Math.min(progress, 100)}%`;
-        
-        // Рендер ачивок
-        renderAchievements();
-    };
-
-    // Анимация прогресс-бара
-    const animateProgressBar = () => {
-        const progressBar = document.getElementById('xp-progress');
-        const width = progressBar.style.width;
-        progressBar.style.width = '0%';
-        
-        setTimeout(() => {
-            progressBar.style.transition = 'width 1s ease-out';
-            progressBar.style.width = width;
-        }, 10);
-    };
-
-    // Рендер ачивок
-    const renderAchievements = () => {
-        const container = document.getElementById('achievements-container');
-        container.innerHTML = '';
-        
-        app.userData.achievements.forEach(achievement => {
-            const achievementData = app.achievements[achievement.key];
-            if (!achievementData) return;
+        try {
+            console.log('Рендер профиля...');
+            if (!app.userData) {
+                console.warn('Данные профиля отсутствуют');
+                return;
+            }
             
-            const tierClass = achievement.tier === 1 ? 'bronze' : 
-                             achievement.tier === 2 ? 'silver' : 'gold';
+            // Обновляем данные профиля
+            const usernameEl = document.getElementById('profile-username');
+            if (usernameEl) {
+                usernameEl.textContent = app.userData.display_name || app.userData.username || `Игрок ${app.userId}`;
+            }
             
-            const achievementEl = document.createElement('div');
-            achievementEl.className = `achievement-card ${tierClass}`;
-            achievementEl.innerHTML = `
-                <img src="/static/img/achievements/${achievement.key}_${tierClass}.png" 
-                     alt="${achievementData.title}">
-                <div class="achievement-info">
-                    <h4>${achievementData.title}</h4>
-                    <p>${achievementData.description}</p>
-                </div>
-            `;
+            const creditsEl = document.getElementById('profile-credits');
+            if (creditsEl) {
+                creditsEl.textContent = (app.userData.credits || 0).toLocaleString();
+            }
             
-            container.appendChild(achievementEl);
-        });
-    };
-
-    // Рендер матчей
-    const renderMatches = () => {
-        const container = document.getElementById('matches-container');
-        container.innerHTML = '';
-        
-        if (app.matches.length === 0) {
-            container.innerHTML = '<p class="no-matches">Нет запланированных матчей</p>';
-            return;
+            const levelEl = document.getElementById('profile-level');
+            if (levelEl) {
+                levelEl.textContent = `Уровень ${app.userData.level || 1}`;
+            }
+            
+            const xpCurrentEl = document.getElementById('profile-xp-current');
+            if (xpCurrentEl) {
+                xpCurrentEl.textContent = app.userData.xp || 0;
+            }
+            
+            const xpNeededEl = document.getElementById('profile-xp-needed');
+            if (xpNeededEl) {
+                xpNeededEl.textContent = app.userData.next_level_xp || 150;
+            }
+            
+            // Обновляем прогресс-бар
+            const progressBar = document.getElementById('xp-progress');
+            if (progressBar) {
+                const currentXp = app.userData.xp || 0;
+                const neededXp = app.userData.next_level_xp || 150;
+                const progress = (currentXp / neededXp) * 100;
+                
+                progressBar.style.transition = 'none';
+                progressBar.style.width = '0%';
+                
+                setTimeout(() => {
+                    progressBar.style.transition = 'width 1s ease-out';
+                    progressBar.style.width = `${Math.min(progress, 100)}%`;
+                }, 10);
+            }
+            
+            // Рендер ачивок
+            renderAchievements();
+            console.log('Профиль успешно отрендерен');
+        } catch (error) {
+            console.error('Ошибка при рендере профиля:', error);
+            showNotification('Ошибка отображения профиля', 'error');
         }
-        
-        app.matches.forEach(match => {
-            const matchEl = document.createElement('div');
-            matchEl.className = 'match-card';
-            matchEl.innerHTML = `
-                <div class="match-header">
-                    <span class="match-date">${match.date} ${match.time}</span>
-                    <span class="match-status ${match.status}">${getStatusText(match.status)}</span>
-                </div>
-                <div class="match-teams">
-                    <div class="team home">
-                        <span class="team-name">${match.home_team}</span>
-                        ${match.score_home ? `<span class="score">${match.score_home}</span>` : ''}
-                    </div>
-                    <div class="vs">vs</div>
-                    <div class="team away">
-                        <span class="team-name">${match.away_team}</span>
-                        ${match.score_away ? `<span class="score">${match.score_away}</span>` : ''}
-                    </div>
-                </div>
-                <div class="match-venue">${match.venue || ''}</div>
-                <button class="bet-button" data-match-id="${match.match_id}">Сделать ставку</button>
-            `;
-            
-            container.appendChild(matchEl);
-        });
-        
-        // Добавляем обработчики кнопок
-        document.querySelectorAll('.bet-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const matchId = e.target.dataset.matchId;
-                showBetModal(matchId);
-            });
-        });
     };
 
-    // Текст для статуса матча
+    // Рендер ачивок с обработкой ошибок
+    const renderAchievements = () => {
+        try {
+            console.log('Рендер ачивок...');
+            const container = document.getElementById('achievements-container');
+            if (!container) {
+                console.warn('Контейнер для ачивок не найден');
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            if (!app.userData || !app.userData.achievements || app.userData.achievements.length === 0) {
+                container.innerHTML = '<p class="no-achievements">Нет открытых достижений</p>';
+                return;
+            }
+            
+            app.userData.achievements.forEach(achievement => {
+                try {
+                    // Проверяем необходимые данные
+                    if (!achievement.key || achievement.tier === undefined) {
+                        console.warn('Пропущена ачивка с недостающими данными:', achievement);
+                        return;
+                    }
+                    
+                    const achievementData = app.achievements[achievement.key];
+                    if (!achievementData) {
+                        console.warn(`Данные об ачивке не найдены: ${achievement.key}`);
+                        return;
+                    }
+                    
+                    const tierClass = achievement.tier === 1 ? 'bronze' : 
+                                     achievement.tier === 2 ? 'silver' : 'gold';
+                    
+                    const achievementEl = document.createElement('div');
+                    achievementEl.className = `achievement-card ${tierClass}`;
+                    achievementEl.innerHTML = `
+                        <img src="/static/img/achievements/${achievement.key}_${tierClass}.png" 
+                             alt="${achievementData.title}" onerror="this.src='/static/img/achievements/placeholder.png'">
+                        <div class="achievement-info">
+                            <h4>${achievementData.title}</h4>
+                            <p>${achievementData.description}</p>
+                        </div>
+                    `;
+                    
+                    container.appendChild(achievementEl);
+                } catch (achError) {
+                    console.error('Ошибка при рендере конкретной ачивки:', achError);
+                }
+            });
+            
+            console.log('Ачивки успешно отрендерены');
+        } catch (error) {
+            console.error('Критическая ошибка при рендере ачивок:', error);
+            showNotification('Ошибка отображения достижений', 'error');
+        }
+    };
+
+    // Рендер матчей с обработкой ошибок
+    const renderMatches = () => {
+        try {
+            console.log('Рендер матчей...');
+            const container = document.getElementById('matches-container');
+            if (!container) {
+                console.warn('Контейнер для матчей не найден');
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            if (!app.matches || app.matches.length === 0) {
+                container.innerHTML = '<p class="no-matches">Нет запланированных матчей</p>';
+                return;
+            }
+            
+            app.matches.forEach(match => {
+                try {
+                    // Проверяем необходимые данные
+                    if (!match.match_id || !match.home_team || !match.away_team) {
+                        console.warn('Пропущен матч с недостающими данными:', match);
+                        return;
+                    }
+                    
+                    const matchEl = document.createElement('div');
+                    matchEl.className = 'match-card';
+                    matchEl.innerHTML = `
+                        <div class="match-header">
+                            <span class="match-date">${match.date || 'Дата не указана'} ${match.time || ''}</span>
+                            <span class="match-status ${match.status || 'scheduled'}">${getStatusText(match.status)}</span>
+                        </div>
+                        <div class="match-teams">
+                            <div class="team home">
+                                <span class="team-name">${match.home_team}</span>
+                                ${match.score_home ? `<span class="score">${match.score_home}</span>` : ''}
+                            </div>
+                            <div class="vs">vs</div>
+                            <div class="team away">
+                                <span class="team-name">${match.away_team}</span>
+                                ${match.score_away ? `<span class="score">${match.score_away}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="match-venue">${match.venue || 'Место не указано'}</div>
+                        <button class="bet-button" data-match-id="${match.match_id}">Сделать ставку</button>
+                    `;
+                    
+                    container.appendChild(matchEl);
+                } catch (matchError) {
+                    console.error('Ошибка при рендере конкретного матча:', matchError);
+                }
+            });
+            
+            // Добавляем обработчики кнопок
+            document.querySelectorAll('.bet-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const matchId = e.target.dataset.matchId;
+                    showBetModal(matchId);
+                });
+            });
+            
+            console.log('Матчи успешно отрендерены');
+        } catch (error) {
+            console.error('Критическая ошибка при рендере матчей:', error);
+            showNotification('Ошибка отображения матчей', 'error');
+        }
+    };
+
+    // Текст для статуса матча с обработкой неизвестных статусов
     const getStatusText = (status) => {
         const statuses = {
             'scheduled': 'Запланирован',
             'live': 'Идет матч',
             'done': 'Завершен'
         };
-        return statuses[status] || status;
+        return statuses[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Неизвестно');
     };
 
-    // Показ модального окна ставки
+    // Показ модального окна ставки с проверкой
     const showBetModal = (matchId) => {
         const modal = document.getElementById('bet-modal');
+        if (!modal) {
+            console.error('Модальное окно не найдено');
+            return;
+        }
+        
         modal.dataset.matchId = matchId;
         
         // Загружаем данные матча
         const match = app.matches.find(m => m.match_id === matchId);
-        if (!match) return;
+        if (!match) {
+            console.error(`Матч не найден: ${matchId}`);
+            showNotification('Матч не найден', 'error');
+            return;
+        }
         
-        document.getElementById('modal-match-title').textContent = 
-            `${match.home_team} vs ${match.away_team}`;
+        const titleEl = document.getElementById('modal-match-title');
+        const dateEl = document.getElementById('modal-match-date');
         
-        document.getElementById('modal-match-date').textContent = 
-            `${match.date} ${match.time}`;
+        if (titleEl) titleEl.textContent = `${match.home_team} vs ${match.away_team}`;
+        if (dateEl) dateEl.textContent = `${match.date} ${match.time}`;
         
         // Скрываем все типы ставок сначала
         document.querySelectorAll('.bet-type').forEach(el => {
@@ -243,13 +368,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Закрытие модального окна
     const closeBetModal = () => {
-        document.getElementById('bet-modal').style.display = 'none';
+        const modal = document.getElementById('bet-modal');
+        if (modal) modal.style.display = 'none';
     };
 
-    // Размещение ставки
+    // Размещение ставки с улучшенной обработкой ошибок
     const placeBet = async () => {
         const modal = document.getElementById('bet-modal');
+        if (!modal) {
+            showNotification('Ошибка: модальное окно не найдено', 'error');
+            return;
+        }
+        
         const matchId = modal.dataset.matchId;
+        if (!matchId) {
+            showNotification('Ошибка: ID матча не найден', 'error');
+            return;
+        }
         
         const betType = document.querySelector('input[name="bet-type"]:checked')?.value;
         const selection = document.querySelector('input[name="selection"]:checked')?.value;
@@ -261,6 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         try {
+            console.log(`Размещение ставки: ${betType} ${selection} ${amount}`);
             const response = await fetch('/api/bet', {
                 method: 'POST',
                 headers: {
@@ -277,7 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const data = await response.json();
             
-            if (data.success) {
+            if (response.ok && data.success) {
                 showNotification(`Ставка размещена! Коэффициент: ${data.odds}`, 'success');
                 closeBetModal();
                 
@@ -285,7 +421,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 await loadUserData();
                 renderProfile();
             } else {
-                throw new Error(data.error || 'Ошибка при размещении ставки');
+                const errorMsg = data.error || 'Ошибка при размещении ставки';
+                throw new Error(errorMsg);
             }
         } catch (error) {
             console.error('Ошибка ставки:', error);
@@ -293,9 +430,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Ежедневный чек-ин
+    // Ежедневный чек-ин с улучшенной обработкой
     const dailyCheckin = async () => {
         try {
+            console.log('Ежедневный чек-ин...');
             const response = await fetch('/api/daily-checkin', {
                 method: 'POST',
                 headers: {
@@ -306,17 +444,16 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const data = await response.json();
             
-            if (data.success) {
-                showNotification(
-                    `Чек-ин успешен! +${data.credits_reward} кредитов, +${data.xp_reward} XP (Стрик: ${data.streak})`,
-                    'success'
-                );
+            if (response.ok && data.success) {
+                const message = `Чек-ин успешен! +${data.credits_reward} кредитов, +${data.xp_reward} XP (Стрик: ${data.streak})`;
+                showNotification(message, 'success');
                 
                 // Обновляем данные пользователя
                 await loadUserData();
                 renderProfile();
             } else {
-                throw new Error(data.error || 'Ошибка чек-ина');
+                const errorMsg = data.error || 'Ошибка ежедневного чек-ина';
+                throw new Error(errorMsg);
             }
         } catch (error) {
             console.error('Ошибка чек-ина:', error);
@@ -324,9 +461,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Показ уведомления
+    // Показ уведомления с автоматическим исчезновением
     const showNotification = (message, type = 'info') => {
         const notification = document.getElementById('notification');
+        if (!notification) return;
+        
         notification.textContent = message;
         notification.className = `notification ${type}`;
         notification.style.display = 'block';
@@ -342,34 +481,52 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 const page = e.target.dataset.page;
-                if (page) showPage(page);
+                if (page) {
+                    console.log(`Переход на страницу: ${page}`);
+                    showPage(page);
+                }
             });
         });
         
         // Кнопка чек-ина
-        document.getElementById('checkin-button')?.addEventListener('click', dailyCheckin);
+        const checkinButton = document.getElementById('checkin-button');
+        if (checkinButton) {
+            checkinButton.addEventListener('click', dailyCheckin);
+        }
         
         // Кнопка закрытия модального окна
-        document.getElementById('close-modal')?.addEventListener('click', closeBetModal);
+        const closeModal = document.getElementById('close-modal');
+        if (closeModal) {
+            closeModal.addEventListener('click', closeBetModal);
+        }
         
         // Кнопка размещения ставки
-        document.getElementById('place-bet-button')?.addEventListener('click', placeBet);
+        const placeBetButton = document.getElementById('place-bet-button');
+        if (placeBetButton) {
+            placeBetButton.addEventListener('click', placeBet);
+        }
         
         // Выбор суммы ставки
         document.querySelectorAll('.bet-amount-option').forEach(option => {
             option.addEventListener('click', () => {
-                document.getElementById('bet-amount').value = option.dataset.amount;
+                const amountInput = document.getElementById('bet-amount');
+                if (amountInput) {
+                    amountInput.value = option.dataset.amount;
+                    updateOdds();
+                }
             });
         });
         
         // Обновление коэффициентов при выборе ставки
-        document.querySelectorAll('input[name="bet-type"]').forEach(input => {
+        document.querySelectorAll('input[name="bet-type"], input[name="selection"]').forEach(input => {
             input.addEventListener('change', updateOdds);
         });
         
-        document.querySelectorAll('input[name="selection"]').forEach(input => {
-            input.addEventListener('change', updateOdds);
-        });
+        // Обновление коэффициентов при изменении суммы
+        const amountInput = document.getElementById('bet-amount');
+        if (amountInput) {
+            amountInput.addEventListener('change', updateOdds);
+        }
     };
 
     // Обновление коэффициентов
@@ -395,9 +552,11 @@ document.addEventListener('DOMContentLoaded', () => {
             odds = 5.50;
         }
         
-        document.getElementById('current-odds').textContent = odds.toFixed(2);
-        document.getElementById('potential-winnings').textContent = 
-            (amount * odds).toFixed(2);
+        const oddsEl = document.getElementById('current-odds');
+        const winningsEl = document.getElementById('potential-winnings');
+        
+        if (oddsEl) oddsEl.textContent = odds.toFixed(2);
+        if (winningsEl) winningsEl.textContent = (amount * odds).toFixed(2);
     };
 
     // Инициализация админ-панели (если владелец)
@@ -406,7 +565,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const userId = urlParams.get('user_id');
         
         if (userId === process.env.OWNER_TELEGRAM_ID) {
-            document.getElementById('admin-tab').style.display = 'block';
+            const adminTab = document.getElementById('admin-tab');
+            if (adminTab) adminTab.style.display = 'block';
         }
     };
 
