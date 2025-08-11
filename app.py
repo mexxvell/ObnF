@@ -43,10 +43,10 @@ def check_time_sync():
 # Optional: gspread for Google Sheets integration
 try:
     import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
+    from google.oauth2 import service_account
     GS_ENABLED = True
     logger = logging.getLogger(__name__)
-    logger.info("gspread и oauth2client успешно импортированы")
+    logger.info("gspread и google.oauth2 успешно импортированы")
 except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning("gspread не установлен: %s", e)
@@ -281,6 +281,20 @@ if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
         
         # Авторизуемся через gspread
         gs_client = gspread.authorize(credentials)
+        
+        # Пытаемся открыть таблицу
+try:
+    sheet = gs_client.open_by_key(GS_SHEET_ID)
+    logger.info("Successfully connected to Google Sheets with title: %s", sheet.title)
+except gspread.exceptions.APIError as e:
+    error_details = e.response.json()
+    if 'error' in error_details and 'message' in error_details['error']:
+        error_message = error_details['error']['message']
+        if 'has no permission' in error_message or 'Forbidden' in error_message:
+            logger.error("ACCESS ERROR: Service account does not have access to the spreadsheet. "
+                        "Please share the spreadsheet with: %s", 
+                        creds_dict.get('client_email', 'UNKNOWN_EMAIL'))
+    raise
         
         # Проверяем подключение
         logger.info("Successfully authorized with Google Sheets API")
