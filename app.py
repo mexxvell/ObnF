@@ -153,110 +153,292 @@ def ensure_sheets_structure():
 _initialized = False
 
 def init_database():
-    """Инициализирует структуру базы данных из SQL-скрипта"""
+    """Полная инициализация базы данных с проверкой всех таблиц и колонок"""
+    logger.info("🔍 Начинаем проверку структуры базы данных...")
+    
     try:
-        # Проверяем, существует ли таблица users
         db = get_db()
         cursor = db.cursor()
         
-        # Проверяем наличие таблицы users
-        cursor.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'users'
-            )
-        """)
-        table_exists = cursor.fetchone()[0]
+        # Проверяем существование всех необходимых таблиц
+        required_tables = [
+            'users', 'achievements_unlocked', 'matches_cache', 
+            'leaderboard_cache', 'transactions', 'leaderboard_history',
+            'admin_actions_log'
+        ]
         
-        if not table_exists:
-            logger.info("Таблицы не найдены, запускаем инициализацию из schema.sql")
-            
-            # Читаем SQL-скрипт
-            with open('sql/schema.sql', 'r', encoding='utf-8') as f:
-                sql_script = f.read()
-            
-            # Выполняем скрипт
-            cursor.execute(sql_script)
-            db.commit()
-            logger.info("✅ Структура базы данных успешно инициализирована")
-        else:
-            logger.info("База данных уже инициализирована")
-            
-            # Проверяем наличие необходимых колонок в таблице users
+        existing_tables = []
+        for table in required_tables:
             cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'users'
-            """)
-            columns = [row[0] for row in cursor.fetchall()]
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' AND table_name = %s
+                )
+            """, (table,))
+            if cursor.fetchone()[0]:
+                existing_tables.append(table)
+        
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if missing_tables:
+            logger.info(f"⚠️ Отсутствуют таблицы: {', '.join(missing_tables)}")
             
-            required_columns = ['credits', 'xp', 'level', 'daily_checkin_streak', 'last_checkin_date']
-            missing_columns = [col for col in required_columns if col not in columns]
-            
-            if missing_columns:
-                logger.warning(f"Отсутствуют колонки в таблице users: {', '.join(missing_columns)}")
-                # Можно добавить код для добавления недостающих колонок
-                for col in missing_columns:
-                    if col == 'credits':
-                        cursor.execute("ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
-                    elif col == 'xp':
-                        cursor.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0")
-                    elif col == 'level':
-                        cursor.execute("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
-                    elif col == 'daily_checkin_streak':
-                        cursor.execute("ALTER TABLE users ADD COLUMN daily_checkin_streak INTEGER NOT NULL DEFAULT 0")
-                    elif col == 'last_checkin_date':
-                        cursor.execute("ALTER TABLE users ADD COLUMN last_checkin_date DATE")
-                db.commit()
-                logger.info(f"✅ Добавлены недостающие колонки: {', '.join(missing_columns)}")
+            # Попробуем создать недостающие таблицы через schema.sql
+            try:
+                with open('sql/schema.sql', 'r', encoding='utf-8') as f:
+                    sql_script = f.read()
                 
+                # Выполняем скрипт построчно, чтобы обработать возможные ошибки
+                for statement in sql_script.split(';'):
+                    statement = statement.strip()
+                    if statement:
+                        try:
+                            cursor.execute(statement)
+                        except Exception as e:
+                            logger.warning(f"Предупреждение при выполнении SQL: {str(e)}")
+                
+                db.commit()
+                logger.info("✅ Все таблицы успешно созданы из schema.sql")
+                
+                # Перепроверяем
+                existing_tables = []
+                for table in required_tables:
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_schema = 'public' AND table_name = %s
+                        )
+                    """, (table,))
+                    if cursor.fetchone()[0]:
+                        existing_tables.append(table)
+                
+                still_missing = [table for table in required_tables if table not in existing_tables]
+                if still_missing:
+                    logger.warning(f"⚠️ Всё ещё отсутствуют таблицы: {', '.join(still_missing)}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка при выполнении schema.sql: {str(e)}")
+                # Создаем минимально необходимые таблицы вручную
+                create_minimal_tables(cursor, db)
+        else:
+            logger.info("✅ Все таблицы существуют")
+            
+            # Проверяем структуру таблицы users
+            check_users_table_structure(cursor, db)
+            
+            # Проверяем структуру таблицы matches_cache
+            check_matches_cache_table(cursor, db)
+            
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при инициализации базы данных: {str(e)}")
-        # Попробуем выполнить минимальную инициализацию
+        # Создаем минимально необходимые таблицы
         try:
             db = get_db()
             cursor = db.cursor()
-            
-            # Создаем минимальную таблицу users
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id BIGINT PRIMARY KEY,
-                    credits INTEGER NOT NULL DEFAULT 0,
-                    xp INTEGER NOT NULL DEFAULT 0,
-                    level INTEGER NOT NULL DEFAULT 1,
-                    daily_checkin_streak INTEGER NOT NULL DEFAULT 0,
-                    last_checkin_date DATE,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """)
-            
-            # Создаем минимальную таблицу matches_cache
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS matches_cache (
-                    match_id TEXT PRIMARY KEY,
-                    data_json JSONB NOT NULL,
-                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """)
-            
-            db.commit()
-            logger.info("✅ Созданы минимальные таблицы для запуска приложения")
+            create_minimal_tables(cursor, db)
         except Exception as e2:
             logger.error(f"❌ Не удалось создать минимальные таблицы: {str(e2)}")
+
+def create_minimal_tables(cursor, db):
+    """Создает минимально необходимые таблицы для запуска приложения"""
+    logger.info("🔧 Создаем минимально необходимые таблицы...")
+    
+    # Таблица users
+    cursor.execute("""
+        DROP TABLE IF EXISTS users CASCADE;
+        CREATE TABLE users (
+            id BIGINT PRIMARY KEY,
+            username TEXT,
+            display_name TEXT,
+            credits INTEGER NOT NULL DEFAULT 0,
+            xp INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            daily_checkin_streak INTEGER NOT NULL DEFAULT 0,
+            last_checkin_date DATE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            banned_until TIMESTAMP,
+            referrer_id BIGINT
+        )
+    """)
+    
+    # Таблица matches_cache
+    cursor.execute("""
+        DROP TABLE IF EXISTS matches_cache CASCADE;
+        CREATE TABLE matches_cache (
+            match_id TEXT PRIMARY KEY,
+            data_json JSONB NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+    
+    # Таблица achievements_unlocked
+    cursor.execute("""
+        DROP TABLE IF EXISTS achievements_unlocked CASCADE;
+        CREATE TABLE achievements_unlocked (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            achievement_key TEXT NOT NULL,
+            tier SMALLINT NOT NULL,
+            unlocked_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+    
+    db.commit()
+    logger.info("✅ Минимальные таблицы успешно созданы")
+
+def check_users_table_structure(cursor, db):
+    """Проверяет и исправляет структуру таблицы users"""
+    logger.info("🔍 Проверяем структуру таблицы users...")
+    
+    # Получаем текущие колонки
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'users'
+    """)
+    columns = [row[0] for row in cursor.fetchall()]
+    
+    # Определяем необходимые колонки
+    required_columns = {
+        'id': 'BIGINT PRIMARY KEY',
+        'username': 'TEXT',
+        'display_name': 'TEXT',
+        'credits': 'INTEGER NOT NULL DEFAULT 0',
+        'xp': 'INTEGER NOT NULL DEFAULT 0',
+        'level': 'INTEGER NOT NULL DEFAULT 1',
+        'daily_checkin_streak': 'INTEGER NOT NULL DEFAULT 0',
+        'last_checkin_date': 'DATE',
+        'created_at': 'TIMESTAMP NOT NULL DEFAULT NOW()',
+        'updated_at': 'TIMESTAMP NOT NULL DEFAULT NOW()',
+        'banned_until': 'TIMESTAMP',
+        'referrer_id': 'BIGINT'
+    }
+    
+    # Проверяем и добавляем недостающие колонки
+    for col_name, col_def in required_columns.items():
+        if col_name not in columns:
+            logger.warning(f"⚠️ Отсутствует колонка {col_name} в таблице users")
+            
+            # Определяем тип колонки для ALTER TABLE
+            if 'NOT NULL' in col_def:
+                default_val = '0' if 'INTEGER' in col_def else 'NOW()' if 'TIMESTAMP' in col_def else "''"
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def.split('NOT NULL')[0]}")
+                cursor.execute(f"UPDATE users SET {col_name} = {default_val} WHERE {col_name} IS NULL")
+                cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} SET NOT NULL")
+            else:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+            
+            db.commit()
+            logger.info(f"✅ Добавлена колонка {col_name} в таблицу users")
+    
+    # Проверяем типы существующих колонок
+    for col_name, col_def in required_columns.items():
+        if col_name in columns:
+            cursor.execute(f"""
+                SELECT data_type, is_nullable 
+                FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = '{col_name}'
+            """)
+            col_info = cursor.fetchone()
+            
+            if col_info:
+                data_type, is_nullable = col_info
+                needs_fix = False
+                
+                # Проверяем NOT NULL
+                if 'NOT NULL' in col_def and is_nullable == 'YES':
+                    needs_fix = True
+                
+                # Проверяем тип данных (упрощенная проверка)
+                if 'INTEGER' in col_def and data_type != 'integer':
+                    needs_fix = True
+                elif 'TIMESTAMP' in col_def and 'timestamp' not in data_type:
+                    needs_fix = True
+                elif 'TEXT' in col_def and data_type != 'text':
+                    needs_fix = True
+                
+                if needs_fix:
+                    logger.warning(f"⚠️ Некорректный тип колонки {col_name} в таблице users")
+                    # В реальном приложении здесь была бы логика исправления типа колонки
+                    # Для простоты мы просто пересоздадим колонку
+                    try:
+                        cursor.execute(f"ALTER TABLE users RENAME COLUMN {col_name} TO {col_name}_old")
+                        cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                        cursor.execute(f"UPDATE users SET {col_name} = {col_name}_old::text::integer WHERE {col_name}_old IS NOT NULL")
+                        cursor.execute(f"ALTER TABLE users DROP COLUMN {col_name}_old")
+                        db.commit()
+                        logger.info(f"✅ Исправлена колонка {col_name} в таблице users")
+                    except Exception as e:
+                        logger.error(f"❌ Не удалось исправить колонку {col_name}: {str(e)}")
+
+def check_matches_cache_table(cursor, db):
+    """Проверяет и исправляет структуру таблицы matches_cache"""
+    logger.info("🔍 Проверяем структуру таблицы matches_cache...")
+    
+    # Проверяем существование таблицы
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = 'matches_cache'
+        )
+    """)
+    table_exists = cursor.fetchone()[0]
+    
+    if not table_exists:
+        logger.warning("⚠️ Таблица matches_cache не существует")
+        cursor.execute("""
+            CREATE TABLE matches_cache (
+                match_id TEXT PRIMARY KEY,
+                data_json JSONB NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        db.commit()
+        logger.info("✅ Таблица matches_cache создана")
+        return
+    
+    # Проверяем колонки
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'matches_cache'
+    """)
+    columns = [row[0] for row in cursor.fetchall()]
+    
+    required_columns = {
+        'match_id': 'TEXT PRIMARY KEY',
+        'data_json': 'JSONB NOT NULL',
+        'updated_at': 'TIMESTAMP NOT NULL DEFAULT NOW()'
+    }
+    
+    for col_name, col_def in required_columns.items():
+        if col_name not in columns:
+            logger.warning(f"⚠️ Отсутствует колонка {col_name} в таблице matches_cache")
+            
+            if 'NOT NULL' in col_def:
+                default_val = 'NOW()' if 'TIMESTAMP' in col_def else "'{}'"
+                cursor.execute(f"ALTER TABLE matches_cache ADD COLUMN {col_name} {col_def.split('NOT NULL')[0]}")
+                cursor.execute(f"UPDATE matches_cache SET {col_name} = {default_val} WHERE {col_name} IS NULL")
+                cursor.execute(f"ALTER TABLE matches_cache ALTER COLUMN {col_name} SET NOT NULL")
+            else:
+                cursor.execute(f"ALTER TABLE matches_cache ADD COLUMN {col_name} {col_def}")
+            
+            db.commit()
+            logger.info(f"✅ Добавлена колонка {col_name} в таблицу matches_cache")
 
 @app.before_request
 def check_initialization():
     """Проверяет и запускает инициализацию при первом запросе"""
     global _initialized
     if not _initialized:
+        logger.info("🚀 Запуск инициализации приложения...")
         try:
             init_database()  # Сначала инициализируем базу данных
             initialize()     # Затем инициализируем Google Sheets
             _initialized = True
+            logger.info("✅ Инициализация приложения завершена успешно")
         except Exception as e:
-            logger.error(f"Критическая ошибка при инициализации: {str(e)}")
+            logger.error(f"❌ Критическая ошибка при инициализации: {str(e)}")
             # Важно: не устанавливаем _initialized = True при ошибке,
             # чтобы попытаться инициализироваться при следующем запросе
 
@@ -288,110 +470,97 @@ def get_profile():
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
     
+    logger.info(f"🔍 Запрос профиля для пользователя {user_id}")
+    
     db = get_db()
     cursor = db.cursor()
     
     try:
-        # Проверяем структуру таблицы users
-        cursor.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = 'users'
-        """)
-        columns = [row[0] for row in cursor.fetchall()]
-        
-        # Определяем, какие колонки нужны
-        required_columns = ['id', 'username', 'display_name', 'credits', 'xp', 'level', 
-                           'daily_checkin_streak', 'last_checkin_date', 'created_at', 'updated_at']
-        
-        # Если есть недостающие колонки, добавляем их
-        for col in required_columns:
-            if col not in columns:
-                if col == 'credits':
-                    cursor.execute("ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
-                elif col == 'xp':
-                    cursor.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0")
-                elif col == 'level':
-                    cursor.execute("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
-                elif col == 'daily_checkin_streak':
-                    cursor.execute("ALTER TABLE users ADD COLUMN daily_checkin_streak INTEGER NOT NULL DEFAULT 0")
-                elif col == 'last_checkin_date':
-                    cursor.execute("ALTER TABLE users ADD COLUMN last_checkin_date DATE")
-                # Добавьте другие колонки по аналогии
-        
-        db.commit()
+        # Принудительно проверяем структуру таблицы users
+        check_users_table_structure(cursor, db)
     except Exception as e:
-        logger.error(f"Ошибка при проверке структуры таблицы users: {str(e)}")
+        logger.error(f"❌ Ошибка при проверке структуры таблицы users: {str(e)}")
     
     # Получаем профиль пользователя
     try:
         cursor.execute("""
             SELECT id, username, display_name, credits, xp, level, 
-                   daily_checkin_streak, last_checkin_date
+                   daily_checkin_streak, last_checkin_date, created_at, updated_at
             FROM users 
             WHERE id = %s
         """, (user_id,))
         user = cursor.fetchone()
     except Exception as e:
-        logger.error(f"Ошибка при запросе к таблице users: {str(e)}")
+        logger.error(f"❌ Ошибка при запросе к таблице users: {str(e)}")
         # Пытаемся восстановить таблицу
         try:
-            cursor.execute("""
-                CREATE TABLE users (
-                    id BIGINT PRIMARY KEY,
-                    credits INTEGER NOT NULL DEFAULT 0,
-                    xp INTEGER NOT NULL DEFAULT 0,
-                    level INTEGER NOT NULL DEFAULT 1,
-                    daily_checkin_streak INTEGER NOT NULL DEFAULT 0,
-                    last_checkin_date DATE,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """)
-            db.commit()
+            create_minimal_tables(cursor, db)
             user = None
         except Exception as e2:
-            logger.error(f"Не удалось восстановить таблицу users: {str(e2)}")
+            logger.error(f"❌ Не удалось восстановить таблицу users: {str(e2)}")
             return jsonify({"error": "Database error"}), 500
     
     if not user:
+        logger.info(f"🆕 Регистрация нового пользователя {user_id}")
         # Регистрация нового пользователя
         try:
+            # Убедимся, что все колонки существуют
             cursor.execute("""
                 INSERT INTO users (id, credits, xp, level, 
                                   daily_checkin_streak, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
                 RETURNING id, username, display_name, credits, xp, level, 
-                          daily_checkin_streak, last_checkin_date
+                          daily_checkin_streak, last_checkin_date, created_at, updated_at
             """, (user_id, FIRST_LOGIN_CREDITS, XP_REGISTRATION, 1, 0))
             user = cursor.fetchone()
             db.commit()
         except Exception as e:
-            logger.error(f"Ошибка при создании пользователя: {str(e)}")
-            return jsonify({"error": "Database error"}), 500
+            logger.error(f"❌ Ошибка при создании пользователя: {str(e)}")
+            
+            # Попробуем упрощенный запрос без некоторых колонок
+            try:
+                cursor.execute("""
+                    INSERT INTO users (id, credits, xp, level, daily_checkin_streak)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, username, display_name, credits, xp, level, 
+                              daily_checkin_streak, last_checkin_date, created_at, updated_at
+                """, (user_id, FIRST_LOGIN_CREDITS, XP_REGISTRATION, 1, 0))
+                user = cursor.fetchone()
+                db.commit()
+            except Exception as e2:
+                logger.error(f"❌ Критическая ошибка при создании пользователя: {str(e2)}")
+                return jsonify({"error": "Database error"}), 500
     
     # Получаем открытые ачивки
+    achievements = []
     try:
+        # Проверяем существование таблицы achievements_unlocked
         cursor.execute("""
-            SELECT achievement_key, tier, unlocked_at 
-            FROM achievements_unlocked 
-            WHERE user_id = %s
-        """, (user_id,))
-        achievements = cursor.fetchall()
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'achievements_unlocked'
+            )
+        """)
+        if cursor.fetchone()[0]:
+            cursor.execute("""
+                SELECT achievement_key, tier, unlocked_at 
+                FROM achievements_unlocked 
+                WHERE user_id = %s
+            """, (user_id,))
+            achievements = cursor.fetchall()
     except Exception as e:
-        logger.error(f"Ошибка при запросе ачивок: {str(e)}")
-        achievements = []
+        logger.error(f"❌ Ошибка при запросе ачивок: {str(e)}")
     
     # Формируем ответ
     profile = {
         'id': user[0],
         'username': user[1] or f"user_{user[0]}",
         'display_name': user[2] or f"Игрок {user[0]}",
-        'credits': user[3],
-        'xp': user[4],
-        'level': user[5],
-        'daily_streak': user[6],
-        'next_level_xp': calculate_xp_for_level(user[5] + 1),
+        'credits': user[3] if user[3] is not None else FIRST_LOGIN_CREDITS,
+        'xp': user[4] if user[4] is not None else XP_REGISTRATION,
+        'level': user[5] if user[5] is not None else 1,
+        'daily_streak': user[6] if user[6] is not None else 0,
+        'next_level_xp': calculate_xp_for_level(user[5] + 1) if user[5] is not None else calculate_xp_for_level(2),
         'achievements': [{
             'key': a[0],
             'tier': a[1],
@@ -399,36 +568,63 @@ def get_profile():
         } for a in achievements]
     }
     
+    logger.info(f"✅ Профиль пользователя {user_id} успешно загружен")
     return jsonify(profile)
 
 @app.route('/api/matches', methods=['GET'])
 def get_matches():
     """Возвращает матчи из кеша или обновляет из Google Sheets"""
+    logger.info("🔍 Запрос матчей")
+    
     db = get_db()
     cursor = db.cursor()
     
-    # Проверяем актуальность кеша
-    cursor.execute("""
-        SELECT data_json, updated_at 
-        FROM matches_cache 
-        WHERE match_id = 'schedule'
-    """)
-    cache = cursor.fetchone()
+    try:
+        # Принудительно проверяем структуру таблицы matches_cache
+        check_matches_cache_table(cursor, db)
+    except Exception as e:
+        logger.error(f"❌ Ошибка при проверке структуры таблицы matches_cache: {str(e)}")
     
-    # Если кеш старый или отсутствует - обновляем
-    if not cache or (datetime.now(timezone.utc) - cache[1]).total_seconds() > 900:  # 15 минут
-        update_matches_cache()
+    # Проверяем актуальность кеша
+    try:
         cursor.execute("""
             SELECT data_json, updated_at 
             FROM matches_cache 
             WHERE match_id = 'schedule'
         """)
         cache = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"❌ Ошибка при запросе кеша матчей: {str(e)}")
+        cache = None
     
-    return jsonify({
-        'matches': cache[0] if cache else [],
-        'last_updated': cache[1].isoformat() if cache else None
-    })
+    # Если кеш старый или отсутствует - обновляем
+    if not cache or (datetime.now(timezone.utc) - cache[1]).total_seconds() > 900:  # 15 минут
+        logger.info("🔄 Кеш матчей устарел или отсутствует, обновляем...")
+        update_matches_cache()
+        
+        try:
+            cursor.execute("""
+                SELECT data_json, updated_at 
+                FROM matches_cache 
+                WHERE match_id = 'schedule'
+            """)
+            cache = cursor.fetchone()
+        except Exception as e:
+            logger.error(f"❌ Ошибка при повторном запросе кеша: {str(e)}")
+            cache = None
+    
+    if cache:
+        logger.info(f"✅ Кеш матчей успешно загружен (обновлено: {cache[1].isoformat()})")
+        return jsonify({
+            'matches': cache[0],
+            'last_updated': cache[1].isoformat()
+        })
+    else:
+        logger.warning("⚠️ Кеш матчей пуст, возвращаем пустой список")
+        return jsonify({
+            'matches': [],
+            'last_updated': None
+        })
 
 def update_matches_cache():
     """Обновляет кеш матчей из Google Sheets"""
