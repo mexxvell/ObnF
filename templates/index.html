@@ -1,0 +1,302 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>НЛО — Футбольная Лига</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <!-- Иконки через Font Awesome (можно заменить на свои SVG) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- Splash screen -->
+    <div class="page" id="splash">
+        <div class="splash-logo">
+            <img src="/static/img/logo.png" alt="НЛО — Футбольная Лига">
+        </div>
+        <h1 class="splash-text">НЛО — Футбольная Лига</h1>
+        <div class="loading-bar">
+            <div class="loading-progress"></div>
+        </div>
+    </div>
+
+    <!-- Основной интерфейс -->
+    <div class="page" id="main">
+        <!-- Навигация -->
+        <div class="nav">
+            <div class="nav-item active" data-page="profile">
+                <i class="nav-icon fas fa-user"></i>
+                <span>Профиль</span>
+            </div>
+            <div class="nav-item" data-page="bets">
+                <i class="nav-icon fas fa-ticket-alt"></i>
+                <span>Ставки</span>
+            </div>
+            <div class="nav-item" data-page="schedule">
+                <i class="nav-icon fas fa-calendar-alt"></i>
+                <span>Расписание</span>
+            </div>
+            <div class="nav-item" data-page="stats">
+                <i class="nav-icon fas fa-chart-bar"></i>
+                <span>Статистика</span>
+            </div>
+            <div class="nav-item" data-page="admin-panel" id="admin-tab" style="display: none;">
+                <i class="nav-icon fas fa-cog"></i>
+                <span>Админ</span>
+            </div>
+        </div>
+
+        <!-- Профиль -->
+        <div class="page" id="profile">
+            <div class="profile-header">
+                <div class="profile-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="profile-info">
+                    <h2 id="profile-username">Загрузка...</h2>
+                    <div class="profile-stats">
+                        <div class="stat-card">
+                            <div class="stat-value" id="profile-credits">0</div>
+                            <div class="stat-label">Кредиты</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="profile-level">Уровень 1</div>
+                            <div class="stat-label">Уровень</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="xp-progress-container">
+                <div class="xp-progress" id="xp-progress"></div>
+            </div>
+            <div class="level-info">
+                <span>Уровень <span id="profile-level-num">1</span></span>
+                <span><span id="profile-xp-current">0</span>/<span id="profile-xp-needed">150</span> XP</span>
+            </div>
+
+            <div class="checkin-section">
+                <div class="checkin-title">
+                    <i class="fas fa-calendar-check"></i>
+                    <span>Ежедневный чек-ин</span>
+                </div>
+                <div class="checkin-days">
+                    <div class="checkin-day completed">1</div>
+                    <div class="checkin-day completed">2</div>
+                    <div class="checkin-day completed">3</div>
+                    <div class="checkin-day completed">4</div>
+                    <div class="checkin-day completed">5</div>
+                    <div class="checkin-day completed">6</div>
+                    <div class="checkin-day active">7</div>
+                </div>
+                <button class="checkin-button" id="checkin-button">
+                    Получить +20 кредитов
+                </button>
+            </div>
+
+            <div class="achievements-section">
+                <h3 class="section-title">
+                    <i class="fas fa-trophy"></i>
+                    Достижения
+                </h3>
+                <div class="achievements-container" id="achievements-container">
+                    <!-- Ачивки будут загружены через JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Ставки -->
+        <div class="page" id="bets">
+            <h2 class="section-title">
+                <i class="fas fa-ticket-alt"></i>
+                Активные матчи
+            </h2>
+            <div class="matches-container" id="matches-container">
+                <!-- Матчи будут загружены через JS -->
+            </div>
+        </div>
+
+        <!-- Расписание -->
+        <div class="page" id="schedule">
+            <h2 class="section-title">
+                <i class="fas fa-calendar-alt"></i>
+                Расписание матчей
+            </h2>
+            <div class="matches-container" id="schedule-matches-container">
+                <!-- Расписание будет загружено через JS -->
+            </div>
+        </div>
+
+        <!-- Статистика -->
+        <div class="page" id="stats">
+            <h2 class="section-title">
+                <i class="fas fa-chart-bar"></i>
+                Статистика
+            </h2>
+            <div class="stat-card" style="margin-top: 20px;">
+                <h3>Лидерборд недели</h3>
+                <div class="leaderboard">
+                    <!-- Лидерборд будет загружен через JS -->
+                </div>
+            </div>
+            <div class="stat-card" style="margin-top: 20px;">
+                <h3>Ваша статистика</h3>
+                <div class="stat-value" style="font-size: 24px; margin: 15px 0;">75%</div>
+                <p>Процент выигрышных ставок</p>
+                <div class="stat-value" style="font-size: 24px; margin: 15px 0;">42</div>
+                <p>Всего ставок</p>
+            </div>
+        </div>
+
+        <!-- Админ-панель -->
+        <div class="page" id="admin-panel">
+            <div class="admin-section">
+                <h2 class="admin-title">
+                    <i class="fas fa-sync-alt"></i>
+                    Управление данными
+                </h2>
+                <button class="admin-button" id="update-sheets-button">
+                    Обновить данные из Google Sheets
+                </button>
+                <button class="admin-button" id="pay-rewards-button">
+                    Выплатить награды за лидерборд
+                </button>
+                <button class="admin-button">
+                    Обновить ассеты
+                </button>
+            </div>
+
+            <div class="admin-section">
+                <h2 class="admin-title">
+                    <i class="fas fa-chart-bar"></i>
+                    Лидерборд
+                </h2>
+                <div class="leaderboard">
+                    <!-- Лидерборд будет загружен через JS -->
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2 class="admin-title">
+                    <i class="fas fa-money-bill-wave"></i>
+                    Управление кредитами
+                </h2>
+                <div style="margin-bottom: 15px;">
+                    <input type="text" placeholder="Telegram ID пользователя" class="bet-amount-input">
+                </div>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="number" placeholder="Сумма" class="bet-amount-input" style="flex: 1;">
+                    <select class="bet-amount-input" style="width: 120px;">
+                        <option value="credits">Кредиты</option>
+                        <option value="xp">XP</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="admin-button" style="flex: 1; background: var(--success);">
+                        Начислить
+                    </button>
+                    <button class="admin-button" style="flex: 1; background: var(--danger);">
+                        Списать
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно ставки -->
+    <div id="bet-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">
+                    <span id="modal-match-title">Манчестер Сити vs Ливерпуль</span>
+                    <br>
+                    <small id="modal-match-date">2023-10-15 18:30</small>
+                </h2>
+                <button class="close-modal" id="close-modal">&times;</button>
+            </div>
+
+            <div class="bet-type" id="bet-type-1x2">
+                <h3>Победитель</h3>
+                <div class="bet-options">
+                    <div class="bet-option" data-value="1">
+                        <div>П1</div>
+                        <div class="odds">2.10</div>
+                    </div>
+                    <div class="bet-option" data-value="X">
+                        <div>X</div>
+                        <div class="odds">3.20</div>
+                    </div>
+                    <div class="bet-option" data-value="2">
+                        <div>П2</div>
+                        <div class="odds">1.85</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bet-type" id="bet-type-total">
+                <h3>Тотал голов</h3>
+                <div class="bet-options">
+                    <div class="bet-option" data-value="over">
+                        <div>>2.5</div>
+                        <div class="odds">1.90</div>
+                    </div>
+                    <div class="bet-option" data-value="under">
+                        <div><2.5</div>
+                        <div class="odds">1.85</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bet-type" id="bet-type-exact">
+                <h3>Точный счет</h3>
+                <div class="bet-options">
+                    <div class="bet-option" data-value="1-0">
+                        <div>1-0</div>
+                        <div class="odds">7.50</div>
+                    </div>
+                    <div class="bet-option" data-value="1-1">
+                        <div>1-1</div>
+                        <div class="odds">5.50</div>
+                    </div>
+                    <div class="bet-option" data-value="2-1">
+                        <div>2-1</div>
+                        <div class="odds">6.20</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bet-amount">
+                <h3>Сумма ставки</h3>
+                <div class="bet-amount-options">
+                    <div class="bet-amount-option" data-amount="10">10</div>
+                    <div class="bet-amount-option" data-amount="50">50</div>
+                    <div class="bet-amount-option" data-amount="100">100</div>
+                    <div class="bet-amount-option" data-amount="500">500</div>
+                </div>
+                <input type="number" id="bet-amount" class="bet-amount-input" value="10" min="10">
+            </div>
+
+            <div class="odds-info">
+                <div class="odds-row">
+                    <span class="odds-label">Коэффициент:</span>
+                    <span class="odds-value" id="current-odds">1.50</span>
+                </div>
+                <div class="odds-row">
+                    <span class="odds-label">Возможный выигрыш:</span>
+                    <span class="odds-value" id="potential-winnings">15.00</span>
+                </div>
+            </div>
+
+            <button class="bet-submit" id="place-bet-button">
+                Разместить ставку
+            </button>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div class="notification" id="notification"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
