@@ -1624,3 +1624,60 @@ table tr:last-child td {
     text-align: center;
 }
 
+/* Стили для сообщения об ошибке */
+.error-message {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--secondary-bg);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.error-message.hidden {
+    display: none;
+}
+
+.error-message.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.error-message .error-content {
+    max-width: 300px;
+    margin: 0 auto;
+}
+
+.error-message h2 {
+    font-size: 1.6em;
+    color: var(--text);
+    margin-bottom: 16px;
+}
+
+.error-message p {
+    font-size: 1.2em;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.error-message button {
+    background: var(--accent);
+    color: var(--primary-bg);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.error-message button:hover {
+    background: var(--accent-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}

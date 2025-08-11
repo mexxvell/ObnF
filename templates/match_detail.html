@@ -2,11 +2,12 @@
 {% block content %}
 <div class="page page-match">
 
-  <header class="match-header animate-fade-in">
+    <header class="match-header animate-fade-in">
     <div class="team">
       <img class="team-logo" src="/static/img/{{ match.team1|replace(' ', '_')|lower }}.png" alt="{{ match.team1 }}" onerror="this.style.display='none'">
       <div class="team-name">{{ match.team1 }}</div>
       <div class="team-form">{{ form1 }}</div>
+      <div class="team-fans">Фанаты: <span id="fans-team1">{{ fans_team1 or 0 }}</span></div>
     </div>
 
     <div class="score animate-flip" id="score-box">
@@ -18,6 +19,7 @@
       <img class="team-logo" src="/static/img/{{ match.team2|replace(' ', '_')|lower }}.png" alt="{{ match.team2 }}" onerror="this.style.display='none'">
       <div class="team-name">{{ match.team2 }}</div>
       <div class="team-form">{{ form2 }}</div>
+      <div class="team-fans">Фанаты: <span id="fans-team2">{{ fans_team2 or 0 }}</span></div>
     </div>
   </header>
 

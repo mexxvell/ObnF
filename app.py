@@ -237,7 +237,17 @@ def init_db():
             )
         '''))
     
-    logger.info("DB initialized")
+            # favorite_clubs table
+        conn.execute(sql_text('''
+            CREATE TABLE IF NOT EXISTS favorite_clubs (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                club_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id)
+            )
+        '''))
+        logger.info("Ensured 'favorite_clubs' table exists")
 
 init_db()
 
@@ -503,28 +513,26 @@ def miniapp_profile():
     if not user_id:
         logger.warning("Попытка доступа к профилю без user_id в сессии")
         return "Not authorized", 403
-    
     logger.info(f"Запрос профиля для user_id={user_id}")
-    
     try:
         user = get_user(user_id)
         if not user:
             logger.warning(f"Пользователь с user_id={user_id} не найден")
             return "User not found", 404
-        
         stats = get_user_stats(user_id)
         achievements = get_user_achievements(user_id)
-        
+        # Получаем любимый клуб пользователя
+        favorite_club = get_user_favorite_club(user_id)
         # Формируем реферальную ссылку
         referral_link = f"{MINIAPP_URL}?ref={user_id}"
-        
         logger.info(f"Профиль для user_id={user_id} успешно загружен")
         return render_template('profile.html', 
                               user=user, 
                               stats=stats, 
                               achievements=achievements,
                               user_id=user_id,
-                              referral_link=referral_link)
+                              referral_link=referral_link,
+                              favorite_club=favorite_club)
     except Exception as e:
         logger.error(f"Ошибка при загрузке профиля для user_id={user_id}: {str(e)}", exc_info=True)
         return "Internal server error", 500
@@ -534,9 +542,9 @@ def miniapp_profile_edit():
     user_id = session.get('user_id', 0)
     if not user_id:
         return "Not authorized", 403
-    
     user = get_user(user_id)
-    
+    # Получаем любимый клуб пользователя
+    favorite_club = get_user_favorite_club(user_id)
     # Получаем список команд из Google Sheets
     clubs = []
     if gs_client and sheet:
@@ -549,18 +557,17 @@ def miniapp_profile_edit():
                     clubs.append(club)
         except Exception as e:
             logger.error(f"Error getting clubs from Google Sheets: {e}")
-    
     return render_template('profile_edit.html', 
                           user=user, 
                           clubs=clubs,
-                          user_id=user_id)
+                          user_id=user_id,
+                          favorite_club=favorite_club)
 
 @app.route('/miniapp/profile/save', methods=['POST'])
 def miniapp_profile_save():
     user_id = session.get('user_id', 0)
     if not user_id:
         return jsonify({"error": "unauthorized"}), 403
-    
     data = request.json
     full_name = data.get('full_name', '')
     birth_date = data.get('birth_date', '')
@@ -577,7 +584,6 @@ def miniapp_profile_save():
                     birth_date_formatted = birth_date_obj.strftime("%Y-%m-%d")
                 except ValueError:
                     pass
-            
             # Обновляем профиль
             conn.execute(sql_text("""
                 UPDATE users 
@@ -591,6 +597,15 @@ def miniapp_profile_save():
                 "favorite_club": favorite_club,
                 "user_id": user_id
             })
+            
+            # Если указан любимый клуб, сохраняем его
+            if favorite_club:
+                set_user_favorite_club(user_id, favorite_club)
+                # Синхронизируем с Google Sheets
+                try:
+                    sync_favorite_clubs_to_sheets()
+                except Exception as e:
+                    logger.error(f"Error syncing favorite clubs to sheets: {e}")
         
         return jsonify({"success": True})
     except Exception as e:
@@ -1132,10 +1147,29 @@ def get_daily_streak_bonus(user_id):
 
 def user_level_for_xp(xp):
     """Рассчитывает уровень пользователя на основе XP"""
-    # Прогрессивная система уровней
-    level = min(100, xp // 100 + 1)
-    next_xp = (level) * 100
-    return level, next_xp
+    # Прогрессивная система уровней до 100
+    # Уровень 1: 0-99 XP
+    # Уровень 2: 100-299 XP
+    # Уровень 3: 300-599 XP
+    # ...
+    # Уровень N: (N-1)*100 + (N-1)*(N-2)*50 XP и выше
+    
+    level = 1
+    xp_needed = 0
+    
+    while level < 100:
+        # Каждый уровень требует больше XP, чем предыдущий
+        xp_for_next_level = 100 + (level - 1) * 50
+        xp_needed += xp_for_next_level
+        
+        if xp < xp_needed:
+            # Найден уровень
+            return level, xp_needed - xp_for_next_level, xp_for_next_level
+        
+        level += 1
+    
+    # Максимальный уровень
+    return 100, xp_needed, 0
 
 def add_xp(user_id, xp_amount, reason=""):
     """Добавляет XP пользователю и обновляет уровень"""
@@ -1143,9 +1177,11 @@ def add_xp(user_id, xp_amount, reason=""):
         row = conn.execute(sql_text("SELECT xp, level FROM users WHERE id = :id"), {"id": user_id}).fetchone()
         if not row:
             return
-        
         new_xp = (row.xp or 0) + xp_amount
-        level, next_xp = user_level_for_xp(new_xp)
+        level, xp_start, xp_for_next = user_level_for_xp(new_xp)
+        
+        # Проверяем, был ли переход на новый уровень
+        level_up = level > row.level
         
         # Обновление данных
         conn.execute(sql_text("""
@@ -1159,43 +1195,75 @@ def add_xp(user_id, xp_amount, reason=""):
             "id": user_id
         })
         
+        # Если пользователь перешел на новый уровень, выдаем бонус
+        if level_up:
+            # Бонус за каждый 10-й уровень
+            if level % 10 == 0:
+                bonus_coins = level * 100  # 1000 кредитов за 10 уровень, 2000 за 20 и т.д.
+                conn.execute(sql_text("""
+                    UPDATE users SET coins = coins + :bonus WHERE id = :id
+                """), {
+                    "bonus": bonus_coins,
+                    "id": user_id
+                })
+                logger.info(f"User {user_id} leveled up to {level} and received {bonus_coins} coins bonus")
+                
+                # Создаем уведомление о повышении уровня
+                try:
+                    bot.send_message(user_id, f"🎉 Поздравляем! Вы достигли уровня {level} и получили бонус {bonus_coins} кредитов!")
+                except Exception as e:
+                    logger.error(f"Error sending level up notification to user {user_id}: {e}")
+        
         # Проверка достижений
-        if level >= 10:
-            check_achievement(user_id, "level_10")
-        if level >= 25:
-            check_achievement(user_id, "level_25")
-        if level >= 50:
-            check_achievement(user_id, "level_50")
-        if level >= 100:
-            check_achievement(user_id, "level_100")
+        check_achievement(user_id, "level_10", level >= 10)
+        check_achievement(user_id, "level_20", level >= 20)
+        check_achievement(user_id, "level_30", level >= 30)
+        check_achievement(user_id, "level_40", level >= 40)
+        check_achievement(user_id, "level_50", level >= 50)
+        check_achievement(user_id, "level_60", level >= 60)
+        check_achievement(user_id, "level_70", level >= 70)
+        check_achievement(user_id, "level_80", level >= 80)
+        check_achievement(user_id, "level_90", level >= 90)
+        check_achievement(user_id, "level_100", level >= 100)
         
         return level
 
-def check_achievement(user_id, trigger):
+def check_achievement(user_id, trigger, condition=True):
     """Проверяет и выдает достижения"""
-    # Список достижений
+    # Список достижений с условиями
     achievements = {
-        "level_10": {"name": "Начинающий", "description": "Достиг 10 уровня", "tier": "bronze"},
-        "level_25": {"name": "Опытный", "description": "Достиг 25 уровня", "tier": "silver"},
-        "level_50": {"name": "Профессионал", "description": "Достиг 50 уровня", "tier": "gold"},
-        "level_100": {"name": "Легенда", "description": "Достиг 100 уровня", "tier": "gold"},
-        "bet_100": {"name": "Смелый прогнозист", "description": "Сделал 100 ставок", "tier": "bronze"},
-        "bet_500": {"name": "Ветеран", "description": "Сделал 500 ставок", "tier": "silver"},
-        "bet_3000": {"name": "Гуру ставок", "description": "Сделал 3000 ставок", "tier": "gold"},
-        "referral_5": {"name": "Рекрутер", "description": "Пригласил 5 друзей", "tier": "bronze"},
-        "referral_20": {"name": "Популярный", "description": "Пригласил 20 друзей", "tier": "silver"},
-        "referral_100": {"name": "Влиятельный", "description": "Пригласил 100 друзей", "tier": "gold"},
-        "win_10": {"name": "Удачливый", "description": "Выиграл 10 ставок подряд", "tier": "bronze"},
-        "win_30": {"name": "Везунчик", "description": "Выиграл 30 ставок подряд", "tier": "silver"},
-        "win_50": {"name": "Фаворит фортуны", "description": "Выиграл 50 ставок подряд", "tier": "gold"},
-        "comment_50": {"name": "Активный", "description": "Оставил 50 комментариев", "tier": "bronze"},
-        "comment_200": {"name": "Комментатор", "description": "Оставил 200 комментариев", "tier": "silver"},
-        "comment_500": {"name": "Эксперт", "description": "Оставил 500 комментариев", "tier": "gold"},
-        "daily_7": {"name": "Последовательный", "description": "7 дней подряд заходил в приложение", "tier": "bronze"},
-        "daily_30": {"name": "Преданный", "description": "30 дней подряд заходил в приложение", "tier": "silver"},
-        "daily_100": {"name": "Настоящий фанат", "description": "100 дней подряд заходил в приложение", "tier": "gold"},
-        "bet_placed": {"name": "Новичок", "description": "Сделал первую ставку", "tier": "bronze"},
+        "level_10": {"name": "Новичок", "description": "Достиг 10 уровня", "tier": "bronze", "condition": lambda: True},
+        "level_20": {"name": "Ученик", "description": "Достиг 20 уровня", "tier": "bronze", "condition": lambda: True},
+        "level_30": {"name": "Знаток", "description": "Достиг 30 уровня", "tier": "silver", "condition": lambda: True},
+        "level_40": {"name": "Эксперт", "description": "Достиг 40 уровня", "tier": "silver", "condition": lambda: True},
+        "level_50": {"name": "Мастер", "description": "Достиг 50 уровня", "tier": "gold", "condition": lambda: True},
+        "level_60": {"name": "Гуру", "description": "Достиг 60 уровня", "tier": "gold", "condition": lambda: True},
+        "level_70": {"name": "Легенда", "description": "Достиг 70 уровня", "tier": "gold", "condition": lambda: True},
+        "level_80": {"name": "Бессмертный", "description": "Достиг 80 уровня", "tier": "gold", "condition": lambda: True},
+        "level_90": {"name": "Божество", "description": "Достиг 90 уровня", "tier": "gold", "condition": lambda: True},
+        "level_100": {"name": "Абсолют", "description": "Достиг 100 уровня", "tier": "gold", "condition": lambda: True},
+        "bet_100": {"name": "Смелый прогнозист", "description": "Сделал 100 ставок", "tier": "bronze", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id"), {"user_id": user_id}).scalar() >= 100},
+        "bet_500": {"name": "Ветеран", "description": "Сделал 500 ставок", "tier": "silver", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id"), {"user_id": user_id}).scalar() >= 500},
+        "bet_1000": {"name": "Марафонец", "description": "Сделал 1000 ставок", "tier": "gold", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id"), {"user_id": user_id}).scalar() >= 1000},
+        "referral_5": {"name": "Рекрутер", "description": "Пригласил 5 друзей", "tier": "bronze", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id"), {"user_id": user_id}).scalar() >= 5},
+        "referral_20": {"name": "Популярный", "description": "Пригласил 20 друзей", "tier": "silver", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id"), {"user_id": user_id}).scalar() >= 20},
+        "referral_50": {"name": "Влиятельный", "description": "Пригласил 50 друзей", "tier": "gold", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id"), {"user_id": user_id}).scalar() >= 50},
+        "win_streak_10": {"name": "Удачливый", "description": "Выиграл 10 ставок подряд", "tier": "bronze", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id AND status = 'won'"), {"user_id": user_id}).scalar() >= 10},
+        "win_streak_30": {"name": "Везунчик", "description": "Выиграл 30 ставок подряд", "tier": "silver", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id AND status = 'won'"), {"user_id": user_id}).scalar() >= 30},
+        "win_streak_50": {"name": "Фаворит фортуны", "description": "Выиграл 50 ставок подряд", "tier": "gold", "condition": lambda conn: conn.execute(sql_text("SELECT COUNT(*) FROM bets WHERE user_id = :user_id AND status = 'won'"), {"user_id": user_id}).scalar() >= 50},
+        "top_week_1": {"name": "Звезда недели", "description": "Попал в топ-10 по неделе", "tier": "silver", "condition": lambda: True},  # Будет проверяться отдельно
+        "top_month_1": {"name": "Чемпион месяца", "description": "Попал в топ-10 по месяцу", "tier": "gold", "condition": lambda: True},  # Будет проверяться отдельно
+        "daily_7": {"name": "Последовательный", "description": "7 дней подряд заходил в приложение", "tier": "bronze", "condition": lambda: True},  # Будет проверяться отдельно
+        "daily_30": {"name": "Преданный", "description": "30 дней подряд заходил в приложение", "tier": "silver", "condition": lambda: True},  # Будет проверяться отдельно
+        "daily_100": {"name": "Настоящий фанат", "description": "100 дней подряд заходил в приложение", "tier": "gold", "condition": lambda: True},  # Будет проверяться отдельно
+        "bet_placed": {"name": "Первый шаг", "description": "Сделал первую ставку", "tier": "bronze", "condition": lambda: True},
     }
+    
+    # Проверяем, существует ли достижение
+    if trigger not in achievements:
+        return
+    
+    achievement = achievements[trigger]
     
     # Проверка, получено ли уже достижение
     with engine.begin() as conn:
@@ -1206,79 +1274,113 @@ def check_achievement(user_id, trigger):
             "user_id": user_id,
             "trigger": trigger
         }).fetchone()
-        
         if existing:
             return
         
-        # Проверка условий для некоторых достижений
-        if trigger == "bet_100":
-            bet_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM bets WHERE user_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if bet_count < 100:
-                return
-        elif trigger == "bet_500":
-            bet_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM bets WHERE user_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if bet_count < 500:
-                return
-        elif trigger == "bet_3000":
-            bet_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM bets WHERE user_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if bet_count < 3000:
-                return
-        elif trigger == "referral_5":
-            ref_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if ref_count < 5:
-                return
-        elif trigger == "referral_20":
-            ref_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if ref_count < 20:
-                return
-        elif trigger == "referral_100":
-            ref_count = conn.execute(sql_text("""
-                SELECT COUNT(*) FROM referrals WHERE referrer_id = :user_id
-            """), {
-                "user_id": user_id
-            }).scalar()
-            if ref_count < 100:
+        # Проверяем условие получения достижения
+        if not condition:
+            return
+            
+        # Для достижений с запросами к БД передаем соединение
+        if callable(achievement["condition"]):
+            try:
+                if not achievement["condition"](conn):
+                    return
+            except Exception as e:
+                logger.error(f"Error checking condition for achievement {trigger}: {e}")
                 return
         
         # Выдача достижения
-        if trigger in achievements:
+        conn.execute(sql_text("""
+            INSERT INTO achievements (user_id, achievement_id)
+            VALUES (:user_id, :achievement_id)
+        """), {
+            "user_id": user_id,
+            "achievement_id": trigger
+        })
+        
+        # Начисление бонуса за достижение
+        bonus_coins = 0
+        if trigger.startswith("level_"):
+            level_num = int(trigger.split("_")[1])
+            bonus_coins = level_num * 50
+        elif trigger.startswith("bet_"):
+            bet_count = int(trigger.split("_")[1])
+            bonus_coins = bet_count // 10  # 1 кредит за каждые 10 ставок
+        elif trigger.startswith("referral_"):
+            ref_count = int(trigger.split("_")[1])
+            bonus_coins = ref_count * 20
+        elif trigger in ["win_streak_10", "win_streak_30", "win_streak_50"]:
+            streak_num = int(trigger.split("_")[2])
+            bonus_coins = streak_num * 10
+        elif trigger in ["top_week_1", "top_month_1"]:
+            bonus_coins = 500
+        elif trigger in ["daily_7", "daily_30", "daily_100"]:
+            days = int(trigger.split("_")[1])
+            bonus_coins = days * 5
+        
+        if bonus_coins > 0:
             conn.execute(sql_text("""
-                INSERT INTO achievements (user_id, achievement_id)
-                VALUES (:user_id, :achievement_id)
+                UPDATE users SET coins = coins + :bonus WHERE id = :user_id
             """), {
-                "user_id": user_id,
-                "achievement_id": trigger
+                "bonus": bonus_coins,
+                "user_id": user_id
             })
+            logger.info(f"User {user_id} received achievement {trigger} and {bonus_coins} coins bonus")
             
-            # Начисление бонуса за достижение
-            if trigger in ["level_10", "level_25", "level_50", "level_100"]:
-                bonus = 50 * int(trigger.split("_")[1])
-                conn.execute(sql_text("""
-                    UPDATE users SET coins = coins + :bonus WHERE id = :user_id
-                """), {
-                    "bonus": bonus,
-                    "user_id": user_id
-                })
+            # Создаем уведомление о достижении
+            try:
+                bot.send_message(user_id, f"🏆 Поздравляем! Вы получили достижение '{achievement['name']}' и бонус {bonus_coins} кредитов!")
+            except Exception as e:
+                logger.error(f"Error sending achievement notification to user {user_id}: {e}")
+                
+def check_top_users_achievements():
+    """Проверяет и выдает достижения для топ-10 пользователей по неделе и месяцу"""
+    with engine.begin() as conn:
+        # Топ-10 по неделе
+        week_top = conn.execute(sql_text("""
+            SELECT u.id, COUNT(b.id) as bet_count
+            FROM users u
+            LEFT JOIN bets b ON u.id = b.user_id
+            WHERE b.created_at > NOW() - INTERVAL '7 days'
+            GROUP BY u.id
+            ORDER BY bet_count DESC
+            LIMIT 10
+        """)).fetchall()
+        
+        for i, user in enumerate(week_top):
+            # Выдаем достижение только первому месту
+            if i == 0:
+                check_achievement(user.id, "top_week_1", True)
+        
+        # Топ-10 по месяцу
+        month_top = conn.execute(sql_text("""
+            SELECT u.id, COUNT(b.id) as bet_count
+            FROM users u
+            LEFT JOIN bets b ON u.id = b.user_id
+            WHERE b.created_at > NOW() - INTERVAL '30 days'
+            GROUP BY u.id
+            ORDER BY bet_count DESC
+            LIMIT 10
+        """)).fetchall()
+        
+        for i, user in enumerate(month_top):
+            # Выдаем достижение только первому месту
+            if i == 0:
+                check_achievement(user.id, "top_month_1", True)
+
+# Запускаем проверку топ-10 пользователей периодически
+def start_top_users_check():
+    while True:
+        try:
+            check_top_users_achievements()
+        except Exception as e:
+            logger.error(f"Error in periodic top users check: {e}")
+        # Проверяем каждые 24 часа
+        time.sleep(86400)
+
+top_users_thread = threading.Thread(target=start_top_users_check, daemon=True)
+top_users_thread.start()
 
 def get_user_achievements(user_id):
     """Возвращает достижения пользователя"""
@@ -1343,6 +1445,115 @@ def get_user_achievements(user_id):
         "tier": r.tier,
         "achieved_at": format_datetime(r.achieved_at)
     } for r in rows]
+    
+    def set_user_favorite_club(user_id, club_name):
+    """Устанавливает любимый клуб пользователя"""
+    with engine.begin() as conn:
+        # Проверяем, существует ли запись
+        existing = conn.execute(sql_text("""
+            SELECT 1 FROM favorite_clubs WHERE user_id = :user_id
+        """), {"user_id": user_id}).fetchone()
+        
+        if existing:
+            # Обновляем существующую запись
+            conn.execute(sql_text("""
+                UPDATE favorite_clubs 
+                SET club_name = :club_name, created_at = NOW()
+                WHERE user_id = :user_id
+            """), {
+                "club_name": club_name,
+                "user_id": user_id
+            })
+        else:
+            # Создаем новую запись
+            conn.execute(sql_text("""
+                INSERT INTO favorite_clubs (user_id, club_name)
+                VALUES (:user_id, :club_name)
+            """), {
+                "user_id": user_id,
+                "club_name": club_name
+            })
+    logger.info(f"Set favorite club '{club_name}' for user {user_id}")
+
+def get_user_favorite_club(user_id):
+    """Возвращает любимый клуб пользователя"""
+    with engine.connect() as conn:
+        row = conn.execute(sql_text("""
+            SELECT club_name FROM favorite_clubs WHERE user_id = :user_id
+        """), {"user_id": user_id}).fetchone()
+        
+    if row:
+        return row.club_name
+    return None
+
+def get_club_fans_count(club_name):
+    """Возвращает количество фанатов клуба"""
+    if not gs_client or not sheet:
+        # Если Google Sheets недоступен, используем локальную базу данных
+        with engine.connect() as conn:
+            count = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM favorite_clubs WHERE club_name = :club_name
+            """), {"club_name": club_name}).scalar()
+        return count or 0
+    
+    try:
+        # Получаем данные из Google Sheets
+        ws = sheet.worksheet("ЛЮБИМЫЕ КЛУБЫ")
+        data = ws.get_all_values()
+        
+        # Подсчитываем количество фанатов
+        fans_count = 0
+        for row in data[1:]:  # Пропускаем заголовок
+            if len(row) > 1 and row[1] == club_name:
+                fans_count += 1
+                
+        return fans_count
+    except Exception as e:
+        logger.error(f"Error getting fans count from Google Sheets: {e}")
+        # В случае ошибки используем локальную базу данных
+        with engine.connect() as conn:
+            count = conn.execute(sql_text("""
+                SELECT COUNT(*) FROM favorite_clubs WHERE club_name = :club_name
+            """), {"club_name": club_name}).scalar()
+        return count or 0
+
+def sync_favorite_clubs_to_sheets():
+    """Синхронизирует любимые клубы с Google Sheets"""
+    if not gs_client or not sheet:
+        return
+    
+    try:
+        # Лист для любимых клубов
+        try:
+            clubs_ws = sheet.worksheet("ЛЮБИМЫЕ КЛУБЫ")
+        except Exception:
+            clubs_ws = sheet.add_worksheet("ЛЮБИМЫЕ КЛУБЫ", rows=1000, cols=3)
+        
+        # Данные любимых клубов
+        with engine.connect() as conn:
+            rows = conn.execute(sql_text("""
+                SELECT fc.user_id, u.display_name, fc.club_name, fc.created_at
+                FROM favorite_clubs fc
+                JOIN users u ON fc.user_id = u.id
+                ORDER BY fc.created_at DESC
+            """)).fetchall()
+        
+        # Подготовка данных
+        data = [["ID пользователя", "Имя пользователя", "Любимый клуб", "Дата выбора"]]
+        for r in rows:
+            data.append([
+                r.user_id,
+                r.display_name,
+                r.club_name,
+                str(r.created_at)
+            ])
+        
+        # Обновление листа
+        clubs_ws.clear()
+        clubs_ws.update('A1', data)
+        logger.info("Synced favorite clubs to Google Sheets")
+    except Exception as e:
+        logger.error(f"Error syncing favorite clubs to sheets: {e}")
 
 def current_online_counts():
     """Возвращает статистику онлайн-пользователей"""
@@ -1356,6 +1567,9 @@ def current_online_counts():
 def get_user_stats(user_id):
     """Возвращает статистику пользователя по ставкам"""
     with engine.connect() as conn:
+        # Получаем пользователя для уровня
+        user = get_user(user_id)
+        
         # Проверяем наличие колонки status
         has_status_column = conn.execute(sql_text("""
             SELECT 1 FROM information_schema.columns 
@@ -1368,10 +1582,8 @@ def get_user_stats(user_id):
         """), {
             "user_id": user_id
         }).scalar()
-        
         won_bets = 0
         lost_bets = 0
-        
         if has_status_column:
             won_bets = conn.execute(sql_text("""
                 SELECT COUNT(*) FROM bets 
@@ -1379,7 +1591,6 @@ def get_user_stats(user_id):
             """), {
                 "user_id": user_id
             }).scalar()
-            
             lost_bets = conn.execute(sql_text("""
                 SELECT COUNT(*) FROM bets 
                 WHERE user_id = :user_id AND status = 'lost'
@@ -1400,7 +1611,6 @@ def get_user_stats(user_id):
                 WHERE table_name = 'matches' 
                 AND column_name IN ('odds_team1', 'odds_team2', 'odds_draw')
             """)).fetchall()
-            
             if has_odds_columns:
                 avg_odds = conn.execute(sql_text("""
                     SELECT AVG(odds) FROM (
@@ -1431,14 +1641,12 @@ def get_user_stats(user_id):
                 SELECT 1 FROM information_schema.columns 
                 WHERE table_name = 'bets' AND column_name = 'status'
             """)).scalar()
-            
             # Проверяем, есть ли колонки odds в таблице matches
             has_odds_columns = conn.execute(sql_text("""
                 SELECT 1 FROM information_schema.columns 
                 WHERE table_name = 'matches' 
                 AND column_name IN ('odds_team1', 'odds_team2', 'odds_draw')
             """)).fetchall()
-            
             if has_status_column_in_bets and has_odds_columns:
                 top_users = conn.execute(sql_text("""
                     SELECT u.id, u.display_name, COUNT(b.id) as bet_count,
@@ -1476,6 +1684,13 @@ def get_user_stats(user_id):
             logger.error(f"Error getting top users: {e}", exc_info=True)
             top_users = []
     
+    # Рассчитываем XP до следующего уровня
+    if user:
+        current_level, xp_start, xp_for_next = user_level_for_xp(user.xp)
+        xp_progress = user.xp - xp_start
+    else:
+        current_level, xp_progress, xp_for_next = 1, 0, 100
+    
     return {
         "total_bets": total_bets,
         "won_bets": won_bets,
@@ -1488,7 +1703,10 @@ def get_user_stats(user_id):
             "bet_count": u.bet_count,
             "win_percent": round(u.win_percent, 1) if u.win_percent else 0,
             "avg_odds": round(u.avg_odds, 2) if u.avg_odds else 1.0
-        } for u in top_users]
+        } for u in top_users],
+        "current_level": current_level,
+        "xp_progress": xp_progress,
+        "xp_for_next": xp_for_next
     }
 
 def get_products():
@@ -1680,37 +1898,57 @@ def update_match_score(match_id, s1, s2):
 
 def calculate_odds(match):
     """Рассчитывает коэффициенты с учетом маржи 5%"""
-    total = match.odds_team1 + match.odds_team2 + match.odds_draw
-    if total == 0:
-        return {
-            'team1': 2.0,
-            'team2': 2.0,
-            'draw': 2.0
-        }
-    
     # Убедимся, что все коэффициенты положительные
     odds_team1 = max(match.odds_team1, 1)
     odds_team2 = max(match.odds_team2, 1)
-    odds_draw = max(match.odds_draw, 1)
+    odds_draw = max(match.odds_draw, 0)  # Ничья может быть 0
     
     # Рассчитываем вероятности
     prob_team1 = odds_team1 / 100.0
     prob_team2 = odds_team2 / 100.0
-    prob_draw = odds_draw / 100.0
+    prob_draw = odds_draw / 100.0 if odds_draw > 0 else 0
+    
     total_prob = prob_team1 + prob_team2 + prob_draw
     
-    # Нормализуем вероятности
-    norm_team1 = prob_team1 / total_prob
-    norm_team2 = prob_team2 / total_prob
-    norm_draw = prob_draw / total_prob
-    
-    # Рассчитываем коэффициенты с маржей
-    k_factor = 1.05  # Маржа 5%
-    return {
-        'team1': round(1 / norm_team1 * k_factor, 2),
-        'team2': round(1 / norm_team2 * k_factor, 2),
-        'draw': round(1 / norm_draw * k_factor, 2) if norm_draw > 0 else 0
-    }
+    # Если вероятность ничьей 0, пересчитываем без неё
+    if prob_draw == 0:
+        total_prob = prob_team1 + prob_team2
+        if total_prob == 0:
+            # Если все вероятности 0, устанавливаем равные шансы
+            return {
+                'team1': 2.0,
+                'team2': 2.0,
+                'draw': 0
+            }
+        # Нормализуем вероятности
+        norm_team1 = prob_team1 / total_prob
+        norm_team2 = prob_team2 / total_prob
+        # Рассчитываем коэффициенты с маржей
+        k_factor = 1.05  # Маржа 5%
+        return {
+            'team1': round(1 / norm_team1 * k_factor, 2),
+            'team2': round(1 / norm_team2 * k_factor, 2),
+            'draw': 0
+        }
+    else:
+        if total_prob == 0:
+            # Если все вероятности 0, устанавливаем равные шансы
+            return {
+                'team1': 1.95,
+                'team2': 1.95,
+                'draw': 1.95
+            }
+        # Нормализуем вероятности
+        norm_team1 = prob_team1 / total_prob
+        norm_team2 = prob_team2 / total_prob
+        norm_draw = prob_draw / total_prob
+        # Рассчитываем коэффициенты с маржей
+        k_factor = 1.05  # Маржа 5%
+        return {
+            'team1': round(1 / norm_team1 * k_factor, 2),
+            'team2': round(1 / norm_team2 * k_factor, 2),
+            'draw': round(1 / norm_draw * k_factor, 2) if norm_draw > 0 else 0
+        }
 
 def process_bets_for_match(match_id, score1, score2):
     """Обработка ставок после завершения матча"""
@@ -1718,6 +1956,7 @@ def process_bets_for_match(match_id, score1, score2):
         # Получаем информацию о матче
         match = conn.execute(sql_text("SELECT * FROM matches WHERE id = :match_id"), {"match_id": match_id}).fetchone()
         if not match:
+            logger.error(f"Match {match_id} not found")
             return
         
         # Определяем результат матча
@@ -1727,24 +1966,29 @@ def process_bets_for_match(match_id, score1, score2):
         elif score2 > score1:
             result = "team2"
         
-        # Получаем все ставки на матч
+        # Получаем все активные ставки на матч
         bets = conn.execute(sql_text("""
             SELECT * FROM bets WHERE match_id = :match_id AND status = 'active'
         """), {"match_id": match_id}).fetchall()
         
         # Рассчитываем коэффициенты
         odds = calculate_odds(match)
+        logger.info(f"Processing bets for match {match_id}. Odds: {odds}")
         
         # Обрабатываем каждую ставку
         for bet in bets:
             payout = 0
             status = "lost"
+            logger.debug(f"Processing bet {bet.id} of type {bet.type}")
             
             # Если ставка на победу команды
             if bet.type in ['team1', 'team2', 'draw']:
                 if bet.type == result:
                     status = "won"
-                    payout = bet.amount * odds[result]
+                    payout = int(bet.amount * odds[result])
+                    logger.info(f"Bet {bet.id} won. Payout: {payout}")
+                else:
+                    logger.info(f"Bet {bet.id} lost. Expected {bet.type}, result was {result}")
             
             # Если ставка на точное количество голов
             elif bet.type == 'total_goals' and bet.prediction:
@@ -1753,37 +1997,46 @@ def process_bets_for_match(match_id, score1, score2):
                     actual_goals = score1 + score2
                     if predicted_goals == actual_goals:
                         status = "won"
-                        payout = bet.amount * 3.0  # Фиксированный коэффициент для этой ставки
-                except:
-                    pass
+                        payout = int(bet.amount * 5.0)  # Фиксированный коэффициент для этой ставки
+                        logger.info(f"Bet {bet.id} on total goals won. Payout: {payout}")
+                    else:
+                        logger.info(f"Bet {bet.id} on total goals lost. Predicted {predicted_goals}, actual {actual_goals}")
+                except ValueError:
+                    logger.warning(f"Invalid prediction for total_goals bet {bet.id}: {bet.prediction}")
             
             # Если ставка на пенальти
             elif bet.type == 'penalty' and bet.prediction:
                 # Здесь должна быть логика определения пенальти
                 # Для примера, предположим, что если разница в 1 гол, то пенальти
-                if abs(score1 - score2) == 1:
-                    expected = "yes" if bet.prediction.lower() == "yes" else "no"
-                    # В реальности здесь должна быть проверка на пенальти из данных матча
-                    actual = "yes"  # Временное решение
-                    if expected == actual:
-                        status = "won"
-                        payout = bet.amount * 2.0
+                expected = bet.prediction.lower()
+                # В реальности здесь должна быть проверка на пенальти из данных матча
+                # Пока используем случайное значение для демонстрации
+                actual = random.choice(["yes", "no"])  # Временное решение
+                logger.info(f"Penalty bet {bet.id}. Expected: {expected}, Actual: {actual}")
+                
+                if expected == actual:
+                    status = "won"
+                    payout = int(bet.amount * 2.0)
+                    logger.info(f"Bet {bet.id} on penalty won. Payout: {payout}")
                 else:
-                    status = "lost"
+                    logger.info(f"Bet {bet.id} on penalty lost.")
             
             # Если ставка на удаление
             elif bet.type == 'red_card' and bet.prediction:
                 # Здесь должна быть логика определения удаления
                 # Для примера, предположим, что если разница в 2 гола, то удаление
-                if abs(score1 - score2) >= 2:
-                    expected = "yes" if bet.prediction.lower() == "yes" else "no"
-                    # В реальности здесь должна быть проверка на удаление из данных матча
-                    actual = "yes"  # Временное решение
-                    if expected == actual:
-                        status = "won"
-                        payout = bet.amount * 2.0
+                expected = bet.prediction.lower()
+                # В реальности здесь должна быть проверка на удаление из данных матча
+                # Пока используем случайное значение для демонстрации
+                actual = random.choice(["yes", "no"])  # Временное решение
+                logger.info(f"Red card bet {bet.id}. Expected: {expected}, Actual: {actual}")
+                
+                if expected == actual:
+                    status = "won"
+                    payout = int(bet.amount * 2.0)
+                    logger.info(f"Bet {bet.id} on red card won. Payout: {payout}")
                 else:
-                    status = "lost"
+                    logger.info(f"Bet {bet.id} on red card lost.")
             
             # Обновление ставки
             conn.execute(sql_text("""
@@ -1807,8 +2060,12 @@ def process_bets_for_match(match_id, score1, score2):
                     "payout": payout,
                     "user_id": bet.user_id
                 })
+                logger.info(f"Payout {payout} coins to user {bet.user_id} for bet {bet.id}")
+                
                 # Проверка достижений
                 check_achievement(bet.user_id, "win_streak")
+        
+        logger.info(f"Processed {len(bets)} bets for match {match_id}")
 
 # --- Notifications & subscriptions ---
 def subscribe_to_match(user_id, match_id):
@@ -2461,20 +2718,19 @@ def match_detail(match_id):
     user_id = session.get('user_id', 0)
     if not user_id:
         return "Not authorized", 403
-    
     match = get_match(match_id)
     if not match:
         return "Match not found", 404
-    
     # Получаем информацию о команде
     team_form1 = get_team_form(match.team1)
     team_form2 = get_team_form(match.team2)
     players1 = get_team_players(match.team1)
     players2 = get_team_players(match.team2)
-    
+    # Получаем количество фанатов для каждой команды
+    fans_team1 = get_club_fans_count(match.team1)
+    fans_team2 = get_club_fans_count(match.team2)
     # Проверяем подписку пользователя
     is_subscribed = is_subscribed_to_match(user_id, match_id)
-    
     return render_template('match_detail.html', 
                           match=match,
                           team_form1=team_form1,
@@ -2483,7 +2739,9 @@ def match_detail(match_id):
                           players2=players2,
                           is_subscribed=is_subscribed,
                           user_id=user_id,
-                          owner_id=OWNER_ID)
+                          owner_id=OWNER_ID,
+                          fans_team1=fans_team1,
+                          fans_team2=fans_team2)
 
 @app.route('/miniapp/support')
 def miniapp_support():

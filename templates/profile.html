@@ -7,13 +7,13 @@
         </div>
         <h1>{{ user.display_name }}</h1>
 		        <a href="/miniapp/profile/edit" class="edit-profile-btn">✎</a>
-            <div class="user-stats">
+                <div class="user-stats">
         <div class="stat-item full-width">
             <div class="level-bar">
-                <div class="level-progress" style="width: {{ (user.xp % 100) }}%"></div>
+                <div class="level-progress" style="width: {{ (stats.xp_progress / stats.xp_for_next * 100)|round(1) }}%"></div>
                 <div class="level-info">
                     <span class="level-text">Уровень {{ user.level }}</span>
-                    <span class="xp-text">{{ user.xp % 100 }} / 100 XP</span>
+                    <span class="xp-text">{{ stats.xp_progress }} / {{ stats.xp_for_next }} XP</span>
                 </div>
             </div>
         </div>
