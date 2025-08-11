@@ -1,7 +1,12 @@
 // static/js/miniapp.js
 
+console.log('[INIT] miniapp.js script loaded');
+
+// Объявляем pollInterval в глобальной области видимости
+let pollInterval = null;
+
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[INIT] DOMContentLoaded event triggered');
+    console.log('[INIT] DOMContentLoaded event triggered in miniapp.js');
     
     // Инициализация Telegram WebApp
     const tg = window.Telegram?.WebApp;
@@ -54,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function hideLoadingScreen() {
+    console.log('[INIT] hideLoadingScreen called');
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app-container');
     const frame = document.getElementById('page-frame');
@@ -161,6 +167,7 @@ async function initializeApp() {
             // Запускаем опрос уведомлений
             console.log('[INIT] Starting notifications polling');
             pollNotifications();
+            // pollInterval теперь глобальная переменная
             pollInterval = setInterval(pollNotifications, 8000);
             
             // Устанавливаем активную вкладку
@@ -273,7 +280,7 @@ async function initializeApp() {
                 throw new Error("User data not available");
             }
             
-            console.log('[SESSION] User data:', {
+            console.log('[SESSION] User ', {
                 id: user.id,
                 username: user.username,
                 firstName: user.first_name,
@@ -318,7 +325,7 @@ async function initializeApp() {
             }
             
             const data = await response.json();
-            console.log('[SESSION] Init response data:', data);
+            console.log('[SESSION] Init response ', data);
 
             if (data.success) {
                 console.log('[SESSION] Session initialized successfully');
@@ -883,8 +890,6 @@ async function initializeApp() {
     }
     
     // Опрос уведомлений
-    let pollInterval = null;
-    
     async function pollNotifications() {
         try {
             console.log('[NOTIF] Polling notifications');
@@ -942,3 +947,8 @@ async function initializeApp() {
         }
     }
 }
+
+// Добавим обработчик ошибок загрузки скрипта
+window.addEventListener('error', function(e) {
+    console.error('[WINDOW] Script loading error:', e);
+});
