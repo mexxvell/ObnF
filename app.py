@@ -472,6 +472,30 @@ def miniapp_predictions():
     
     matches = get_upcoming_matches()
     return render_template('predictions.html', matches=matches, user_id=user_id)
+    
+@app.route('/miniapp/standings-data')
+def miniapp_standings_data():
+    user_id = session.get('user_id', 0)
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 403
+    
+    try:
+        # Здесь должна быть логика получения данных турнирной таблицы
+        # Для примера используем тестовые данные
+        standings = [
+            {"team": "ФК Обнинск", "played": 5, "won": 4, "drawn": 1, "lost": 0, "points": 13},
+            {"team": "Спартак", "played": 5, "won": 3, "drawn": 2, "lost": 0, "points": 11},
+            {"team": "Зенит", "played": 5, "won": 3, "drawn": 1, "lost": 1, "points": 10},
+            {"team": "Дождь", "played": 5, "won": 2, "drawn": 2, "lost": 1, "points": 8},
+            {"team": "Рубин", "played": 5, "won": 2, "drawn": 1, "lost": 2, "points": 7},
+            {"team": "Локомотив", "played": 5, "won": 1, "drawn": 2, "lost": 2, "points": 5},
+            {"team": "ЦСКА", "played": 5, "won": 1, "drawn": 1, "lost": 3, "points": 4},
+            {"team": "Динамо", "played": 5, "won": 0, "drawn": 1, "lost": 4, "points": 1}
+        ]
+        return jsonify(standings)
+    except Exception as e:
+        logger.error(f"Error loading standings data: {e}")
+        return jsonify({"error": "failed to load standings"}), 500
 
 @app.route('/miniapp/profile')
 def miniapp_profile():
@@ -1588,12 +1612,22 @@ def get_recent_bets():
     } for r in rows]
 
 def get_matches(round_number=None):
-    """Возвращает матчи из Google Sheets"""
+    """Возвращает матчи из Google Sheets, включая недавно завершенные (последние 24 часа)"""
     matches = get_matches_from_sheets()
+    current_time = datetime.now(timezone.utc)
+    
+    # Фильтруем матчи: оставляем запланированные и недавно завершенные (последние 24 часа)
+    filtered_matches = []
+    for match in matches:
+        match_end_time = match["datetime"] + timedelta(hours=2)  # Предполагаем, что матч длится 2 часа
+        is_recently_finished = (current_time > match_end_time) and (current_time < match_end_time + timedelta(days=1))
+        
+        if match["datetime"] > current_time or is_recently_finished:
+            filtered_matches.append(match)
     
     if round_number:
-        return [m for m in matches if m["round"] == round_number]
-    return matches
+        return [m for m in filtered_matches if m["round"] == round_number]
+    return filtered_matches
 
 def get_upcoming_matches():
     """Возвращает предстоящие матчи из Google Sheets"""
@@ -2149,11 +2183,23 @@ def get_matches_from_sheets():
                 continue
             
             # Определяем статус матча с учетом временной зоны
-            current_time = datetime.now(timezone.utc)
-            status = "scheduled" if match_datetime > current_time else "finished"
-            # Если матч завершен, но счет не 0-0, то статус "finished"
-            if status == "finished" and (score1 > 0 or score2 > 0):
-                status = "finished"
+current_time = datetime.now(timezone.utc)
+match_end_time = match_datetime + timedelta(hours=2)  # Предполагаем, что матч длится 2 часа
+
+# Определяем, является ли матч "актуально завершенным" (в течение последних 24 часов)
+is_recently_finished = (current_time > match_end_time) and (current_time < match_end_time + timedelta(days=1))
+
+# Статус матча
+if match_datetime > current_time:
+    status = "scheduled"
+elif is_recently_finished:
+    status = "recently_finished"  # Новый статус для недавно завершенных матчей
+else:
+    status = "finished"
+
+# Если матч завершен, но счет не 0-0, то статус "finished"
+if status == "finished" and (score1 > 0 or score2 > 0):
+    status = "finished"
             
             # Добавляем матч
             matches.append({

@@ -564,7 +564,82 @@ setTimeout(() => {
                 showNotification('Ошибка загрузки страницы. Проверьте соединение.', 'error');
             };
         }
+		// Добавляем обработчик для вкладки турнирной таблицы
+if (src.includes('/miniapp/nlo')) {
+    setTimeout(() => {
+        try {
+            // Настройка вкладок НЛО 8x8
+            const nloTabs = frame.contentDocument.querySelectorAll('.nlo-tab');
+            const nloTabContents = frame.contentDocument.querySelectorAll('.nlo-tab-content');
+            
+            nloTabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // Удаляем активный класс со всех вкладок
+                    nloTabs.forEach(t => t.classList.remove('active'));
+                    nloTabContents.forEach(c => c.classList.remove('active'));
+                    
+                    // Добавляем активный класс текущей вкладке
+                    tab.classList.add('active');
+                    const tabName = tab.dataset.tab;
+                    frame.contentDocument.querySelector(`.nlo-tab-content[data-tab-content="${tabName}"]`).classList.add('active');
+                    
+                    // Если это вкладка турнирной таблицы, загружаем данные
+                    if (tabName === 'standings') {
+                        loadStandingsTable();
+                    }
+                });
+            });
+            
+            // Функция загрузки турнирной таблицы
+            function loadStandingsTable() {
+                const tableBody = frame.contentDocument.getElementById('standings-table-body');
+                if (!tableBody) return;
+                
+                tableBody.innerHTML = '<tr><td colspan="7" class="loading-text">Загрузка таблицы...</td></tr>';
+                
+                fetch('/miniapp/standings-data')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.length === 0) {
+                            tableBody.innerHTML = '<tr><td colspan="7">Турнирная таблица пуста</td></tr>';
+                            return;
+                        }
+                        
+                        let html = '';
+                        data.forEach((row, index) => {
+                            html += `
+                                <tr>
+                                    <td>${index + 1}</td>
+                                    <td>${row.team}</td>
+                                    <td>${row.played}</td>
+                                    <td>${row.won}</td>
+                                    <td>${row.drawn}</td>
+                                    <td>${row.lost}</td>
+                                    <td>${row.points}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        tableBody.innerHTML = html;
+                    })
+                    .catch(error => {
+                        console.error('[STANDINGS] Error loading standings:', error);
+                        tableBody.innerHTML = '<tr><td colspan="7" class="error">Ошибка загрузки таблицы</td></tr>';
+                    });
+            }
+            
+            // Проверяем активную вкладку при загрузке
+            const activeTab = frame.contentDocument.querySelector('.nlo-tab.active');
+            if (activeTab && activeTab.dataset.tab === 'standings') {
+                loadStandingsTable();
+            }
+        } catch (iframeError) {
+            console.error('[IFRAME] Error setting up NLO tabs:', iframeError);
+        }
+    }, 500);
+}
     }
+
     
     // Показ уведомлений
     function showNotification(message, type = 'info') {

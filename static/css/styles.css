@@ -358,15 +358,24 @@ table tr:last-child td {
     text-align: center;
 }
 
+/* Увеличиваем размер счета и делаем его жирным */
 .vs {
     font-weight: bold;
+    font-size: 1.2em;
     color: var(--accent);
+    min-width: 60px; /* Фиксируем ширину для лучшего выравнивания */
 }
 
 .match-status {
     text-align: center;
     padding: 4px 0;
     border-top: 1px solid var(--border);
+}
+
+/* Стилизация для недавно завершенных матчей */
+.status.recently-finished {
+    background-color: rgba(255, 193, 7, 0.1); /* Желтый фон для недавно завершенных матчей */
+    color: var(--warning);
 }
 
 .status {

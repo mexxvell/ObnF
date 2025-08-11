@@ -4,9 +4,10 @@
     <h2>НЛО 8×8</h2>
     
     <div class="nlo-tabs">
-        <button class="nlo-tab active" data-tab="matches">Матчи</button>
-        <button class="nlo-tab" data-tab="streams">Трансляции</button>
-    </div>
+    <button class="nlo-tab active" data-tab="matches">Матчи</button>
+    <button class="nlo-tab" data-tab="standings">Таблица</button>
+    <button class="nlo-tab" data-tab="streams">Трансляции</button>
+</div>
     
     <div class="nlo-content">
         <div class="nlo-tab-content active" data-tab-content="matches">
@@ -29,30 +30,32 @@
                             </div>
                             
                             <div class="teams">
-                                <div class="team team1">
-                                    <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
-     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
-     alt="{{ match.team1 }}">
-                                    <span>{{ match.team1 }}</span>
-                                </div>
-                                <div class="vs">-</div>
-                                <div class="team team2">
-                                    <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team2|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
-     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
-     alt="{{ match.team2 }}">
-                                    <span>{{ match.team2 }}</span>
-                                </div>
-                            </div>
+    <div class="team team1">
+        <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+        onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+        alt="{{ match.team1 }}">
+        <span>{{ match.team1 }}</span>
+    </div>
+    <div class="vs">{{ match.score1 }} : {{ match.score2 }}</div>
+    <div class="team team2">
+        <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team2|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+        onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+        alt="{{ match.team2 }}">
+        <span>{{ match.team2 }}</span>
+    </div>
+</div>
                             
                             <div class="match-status">
-                                {% if match.status == 'scheduled' %}
-                                <span class="status scheduled">Запланирован</span>
-                                {% elif match.status == 'live' %}
-                                <span class="status live">Идет матч</span>
-                                {% else %}
-                                <span class="status finished">Завершен</span>
-                                {% endif %}
-                            </div>
+    {% if match.status == 'scheduled' %}
+    <span class="status scheduled">Запланирован</span>
+    {% elif match.status == 'live' %}
+    <span class="status live">Идет матч</span>
+    {% elif match.status == 'recently_finished' %}
+    <span class="status recently-finished">Недавно завершен</span>
+    {% else %}
+    <span class="status finished">Завершен</span>
+    {% endif %}
+</div>
                         </div>
                         {% endfor %}
                     </div>
@@ -60,6 +63,31 @@
                 {% endfor %}
             </div>
             
+			<div class="nlo-tab-content" data-tab-content="standings">
+        <h3>Турнирная таблица</h3>
+        <div class="table-container">
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Место</th>
+                        <th>Команда</th>
+                        <th>И</th>
+                        <th>В</th>
+                        <th>Н</th>
+                        <th>П</th>
+                        <th>О</th>
+                    </tr>
+                </thead>
+                <tbody id="standings-table-body">
+                    <!-- Турнирная таблица будет загружена через JS -->
+                    <tr>
+                        <td colspan="7" class="loading-text">Загрузка таблицы...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+	
             <div class="nlo-tab-content" data-tab-content="streams">
                 <h3>Трансляции</h3>
                 <div class="streams-list">
