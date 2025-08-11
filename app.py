@@ -238,18 +238,41 @@ def init_db():
         '''))
     
             # favorite_clubs table
-        conn.execute(sql_text('''
-            CREATE TABLE IF NOT EXISTS favorite_clubs (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                club_name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(user_id)
-            )
-        '''))
-        logger.info("Ensured 'favorite_clubs' table exists")
+try:
+    conn.execute(sql_text('''
+        CREATE TABLE IF NOT EXISTS favorite_clubs (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            club_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id)
+        )
+    '''))
+    logger.info("Ensured 'favorite_clubs' table exists")
+    
+    # Проверяем, добавлена ли колонка user_id как UNIQUE
+    constraints = conn.execute(sql_text("""
+        SELECT constraint_name 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'favorite_clubs' 
+        AND constraint_type = 'UNIQUE'
+    """)).fetchall()
+    
+    if not constraints:
+        conn.execute(sql_text("ALTER TABLE favorite_clubs ADD UNIQUE (user_id)"))
+        logger.info("Added UNIQUE constraint to user_id in favorite_clubs")
+        
+    except Exception as e:
+    logger.error(f"Error creating favorite_clubs table: {e}")
 
 init_db()
+# Принудительная синхронизация после инициализации БД
+if GS_ENABLED:
+    try:
+        sync_favorite_clubs_to_sheets()
+        logger.info("Forced initial sync of favorite clubs to Google Sheets")
+    except Exception as e:
+        logger.error(f"Error during initial sync to Google Sheets: {e}")
 
 # --- gspread (Google Sheets) setup ---
 gs_client = None
@@ -513,6 +536,17 @@ def miniapp_profile():
     if not user_id:
         logger.warning("Попытка доступа к профилю без user_id в сессии")
         return "Not authorized", 403
+        # Проверка существования таблицы favorite_clubs
+with engine.connect() as check_conn:
+    table_exists = check_conn.execute(sql_text("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'favorite_clubs'
+        )
+    """)).scalar()
+    if not table_exists:
+        logger.error("Таблица favorite_clubs не существует в БД!")
     logger.info(f"Запрос профиля для user_id={user_id}")
     try:
         user = get_user(user_id)
@@ -1476,15 +1510,26 @@ def set_user_favorite_club(user_id, club_name):
     logger.info(f"Set favorite club '{club_name}' for user {user_id}")
 
 def get_user_favorite_club(user_id):
-    """Возвращает любимый клуб пользователя"""
+    """Возвращает любимый клуб пользователя с проверкой существования таблицы"""
     with engine.connect() as conn:
+        # Проверяем существование таблицы
+        table_exists = conn.execute(sql_text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'favorite_clubs'
+            )
+        """)).scalar()
+        
+        if not table_exists:
+            return None
+            
         row = conn.execute(sql_text("""
             SELECT club_name FROM favorite_clubs WHERE user_id = :user_id
         """), {"user_id": user_id}).fetchone()
-        
-    if row:
-        return row.club_name
-    return None
+        if row:
+            return row.club_name
+        return None
 
 def get_club_fans_count(club_name):
     """Возвращает количество фанатов клуба"""
