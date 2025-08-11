@@ -6,51 +6,46 @@ document.addEventListener('DOMContentLoaded', () => {
     // Инициализация Telegram WebApp
     const tg = window.Telegram?.WebApp;
     if (tg && tg.expand && tg.ready) {
-        tg.expand();
-        tg.ready();
-        console.log('[TG] Telegram WebApp API initialized successfully');
+        console.log('[TG] Telegram WebApp API detected');
+        try {
+            tg.expand();
+            tg.ready();
+            console.log('[TG] Telegram WebApp API initialized successfully');
+        } catch (e) {
+            console.error('[TG] Error initializing Telegram WebApp API:', e);
+        }
     } else {
-        console.error('[TG] Telegram WebApp API is not available');
-        // Создаем заглушку
-        window.Telegram = window.Telegram || {};
-        window.Telegram.WebApp = {
-            expand: () => console.log('[TG] Mock expand() called'),
-            ready: () => console.log('[TG] Mock ready() called'),
-            HapticFeedback: {
-                impactOccurred: () => {}
-            },
-            initDataUnsafe: {
-                user: {
-                    id: 123456789,
-                    username: "test_user",
-                    first_name: "Test",
-                    last_name: "User"
+        console.warn('[TG] Telegram WebApp API is not available or incomplete');
+        // Создаем заглушку только если API полностью отсутствует
+        if (!window.Telegram) {
+            window.Telegram = {};
+        }
+        if (!window.Telegram.WebApp) {
+            window.Telegram.WebApp = {
+                expand: () => console.log('[TG] Mock expand() called'),
+                ready: () => console.log('[TG] Mock ready() called'),
+                HapticFeedback: {
+                    impactOccurred: () => {}
+                },
+                initDataUnsafe: {
+                    user: {
+                        id: 123456789,
+                        username: "test_user",
+                        first_name: "Test",
+                        last_name: "User"
+                    }
                 }
-            }
-        };
+            };
+            console.log('[TG] Created mock Telegram WebApp API');
+        }
     }
     
     // Проверяем, что Telegram WebApp API доступно
     if (!window.Telegram?.WebApp) {
+        console.error('[INIT] Telegram WebApp API is completely unavailable');
         showNotification('Telegram WebApp API недоступен. Попробуйте перезагрузить страницу.', 'error');
         // Скрываем экран загрузки и показываем контент даже при ошибке
-        const loadingScreen = document.getElementById('loading-screen');
-        const appContainer = document.getElementById('app-container');
-        const frame = document.getElementById('page-frame');
-        
-        if (loadingScreen) {
-            loadingScreen.style.opacity = '0';
-            setTimeout(() => {
-                loadingScreen.style.display = 'none';
-                if (appContainer) {
-                    appContainer.classList.remove('hidden');
-                }
-                if (frame) {
-                    frame.style.display = 'block';
-                    frame.src = '/miniapp/home';
-                }
-            }, 500);
-        }
+        hideLoadingScreen();
         return;
     }
 
@@ -58,7 +53,29 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
 });
 
+function hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loading-screen');
+    const appContainer = document.getElementById('app-container');
+    const frame = document.getElementById('page-frame');
+    
+    if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+            loadingScreen.style.display = 'none';
+            if (appContainer) {
+                appContainer.classList.remove('hidden');
+            }
+            if (frame) {
+                frame.style.display = 'block';
+                frame.src = '/miniapp/home';
+            }
+        }, 500);
+    }
+}
+
 async function initializeApp() {
+    console.log('[INIT] Starting application initialization');
+    
     // Элементы интерфейса
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app-container');
@@ -236,11 +253,21 @@ async function initializeApp() {
         
         try {
             const tg = window.Telegram.WebApp;
+            console.log('[SESSION] Telegram WebApp object:', tg);
+            
+            // Проверяем наличие необходимых методов
+            if (!tg.expand || !tg.ready) {
+                console.error('[SESSION] Required Telegram WebApp methods are missing');
+                throw new Error('Required Telegram WebApp methods are missing');
+            }
+            
             tg.expand();
             tg.ready();
             console.log('[SESSION] Telegram WebApp expanded and ready');
             
             const user = tg.initDataUnsafe?.user || null;
+            console.log('[SESSION] User data from Telegram:', user);
+            
             if (!user) {
                 console.error("[SESSION] User data not available from Telegram");
                 throw new Error("User data not available");
@@ -266,13 +293,14 @@ async function initializeApp() {
                 ref: ref
             };
             
+            console.log('[SESSION] Payload:', payload);
+            
             let response;
             try {
                 response = await fetch('/miniapp/init', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                        // Добавим credentials для сессии
                     },
                     credentials: 'include',
                     body: JSON.stringify(payload)
