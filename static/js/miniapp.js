@@ -478,26 +478,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const frame = document.getElementById('page-frame');
         if (frame) {
             frame.onload = function() {
-                console.log('[IFRAME] Frame loaded:', frame.src);
+    console.log('[IFRAME] Frame loaded:', frame.src);
+    try {
+        // Обновляем активную вкладку на основе содержимого iframe
+        const src = frame.src;
+        if (src.includes('/miniapp/home')) {
+            setActiveTab('home');
+            
+            // Добавляем обработчик для кнопок "Детали" после загрузки страницы
+            setTimeout(() => {
                 try {
-                    // Обновляем активную вкладку на основе содержимого iframe
-                    const src = frame.src;
-                    if (src.includes('/miniapp/home')) {
-                        setActiveTab('home');
-                    } else if (src.includes('/miniapp/nlo')) {
-                        setActiveTab('nlo');
-                    } else if (src.includes('/miniapp/predictions') || 
-                               src.includes('/miniapp/pred')) {
-                        setActiveTab('pred');
-                    } else if (src.includes('/miniapp/profile')) {
-                        setActiveTab('profile');
-                    } else if (src.includes('/miniapp/support')) {
-                        setActiveTab('support');
-                    }
-                } catch (e) {
-                    console.error('[IFRAME] Error updating tab state:', e);
+                    const detailsButtons = frame.contentDocument.querySelectorAll('.details-btn, .match-detail-btn');
+                    detailsButtons.forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
+                            // Получаем ID матча из атрибута data-match-id или из URL
+                            const matchId = btn.dataset.matchId || 
+                                          (btn.closest('.match-card')?.dataset.matchId) ||
+                                          (btn.closest('tr')?.dataset.matchId);
+                            
+                            if (matchId) {
+                                console.log('[MATCH] Opening details for match ID:', matchId);
+                                // Загружаем страницу матча
+                                document.getElementById('page-frame').src = `/miniapp/match/${matchId}`;
+                                
+                                // Закрываем боковое меню, если открыто
+                                document.getElementById('side-menu')?.classList.add('hidden');
+                            } else {
+                                console.error('[MATCH] Match ID not found');
+                                showNotification('Ошибка: не удалось определить матч', 'error');
+                            }
+                        });
+                    });
+                } catch (iframeError) {
+                    console.error('[IFRAME] Error adding details button handlers:', iframeError);
                 }
-            };
+            }, 500); // Задержка для полной загрузки содержимого iframe
+        } else if (src.includes('/miniapp/nlo')) {
+            setActiveTab('nlo');
+        } else if (src.includes('/miniapp/predictions') || 
+                   src.includes('/miniapp/pred')) {
+            setActiveTab('pred');
+        } else if (src.includes('/miniapp/profile')) {
+            setActiveTab('profile');
+        } else if (src.includes('/miniapp/support')) {
+            setActiveTab('support');
+        }
+    } catch (e) {
+        console.error('[IFRAME] Error updating tab state:', e);
+    }
+};
             
             frame.onerror = function() {
                 console.error('[IFRAME] Frame failed to load:', frame.src);
