@@ -227,7 +227,7 @@ def init_db():
             )
         '''))
         
-        # referrals table
+                # referrals table
         conn.execute(sql_text('''
             CREATE TABLE IF NOT EXISTS referrals (
                 id SERIAL PRIMARY KEY,
@@ -236,34 +236,33 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         '''))
-    
-            # favorite_clubs table
-try:
-    conn.execute(sql_text('''
-        CREATE TABLE IF NOT EXISTS favorite_clubs (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT,
-            club_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id)
-        )
-    '''))
-    logger.info("Ensured 'favorite_clubs' table exists")
-    
-    # Проверяем, добавлена ли колонка user_id как UNIQUE
-    constraints = conn.execute(sql_text("""
-        SELECT constraint_name 
-        FROM information_schema.table_constraints 
-        WHERE table_name = 'favorite_clubs' 
-        AND constraint_type = 'UNIQUE'
-    """)).fetchall()
-    
-    if not constraints:
-        conn.execute(sql_text("ALTER TABLE favorite_clubs ADD UNIQUE (user_id)"))
-        logger.info("Added UNIQUE constraint to user_id in favorite_clubs")
         
-    except Exception as e:
-    logger.error(f"Error creating favorite_clubs table: {e}")
+        # favorite_clubs table
+        try:
+            conn.execute(sql_text('''
+                CREATE TABLE IF NOT EXISTS favorite_clubs (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    club_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id)
+                )
+            '''))
+            logger.info("Ensured 'favorite_clubs' table exists")
+            
+            # Проверяем, добавлена ли колонка user_id как UNIQUE
+            constraints = conn.execute(sql_text("""
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'favorite_clubs' 
+                AND constraint_type = 'UNIQUE'
+            """)).fetchall()
+            
+            if not constraints:
+                conn.execute(sql_text("ALTER TABLE favorite_clubs ADD UNIQUE (user_id)"))
+                logger.info("Added UNIQUE constraint to user_id in favorite_clubs")
+        except Exception as e:
+            logger.error(f"Error creating favorite_clubs table: {e}")
 
 init_db()
 # Принудительная синхронизация после инициализации БД
