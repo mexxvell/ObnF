@@ -15,6 +15,31 @@ from sqlalchemy import create_engine, text as sql_text
 import random
 import requests
 
+def check_time_sync():
+    """Проверяет синхронизацию времени с Google"""
+    try:
+        # Получаем текущее время с сервера Google
+        response = requests.head('https://www.google.com', timeout=5)
+        google_time_str = response.headers['Date']
+        google_time = datetime.strptime(google_time_str, '%a, %d %b %Y %H:%M:%S GMT')
+        google_time = google_time.replace(tzinfo=timezone.utc)
+        
+        # Текущее время на сервере
+        server_time = datetime.now(timezone.utc)
+        
+        # Разница во времени в секундах
+        time_diff = abs((google_time - server_time).total_seconds())
+        
+        logger.info(f"Time sync check: Google time = {google_time}, Server time = {server_time}, Difference = {time_diff} seconds")
+        
+        if time_diff > 300:  # 5 минут
+            logger.error(f"CRITICAL: Time difference with Google is {time_diff} seconds (more than 300 seconds)!")
+            return False
+        return True
+    except Exception as e:
+        logger.warning(f"Could not check time sync: {e}")
+        return True  # Не блокируем работу при ошибке проверки
+
 # Optional: gspread for Google Sheets integration
 try:
     import gspread
@@ -66,6 +91,10 @@ if not DATABASE_URL:
 
 engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 
+# Проверяем синхронизацию времени
+if not check_time_sync():
+    logger.warning("Time is not synchronized with Google. This may cause JWT signature errors.")
+    
 def init_db():
     with engine.connect() as conn:
         # users table
@@ -2147,6 +2176,64 @@ def get_matches_from_sheets():
             return MATCHES_CACHE['data']  # Возвращаем старые данные при ошибке
         return []
         
+        
+
+def sync_matches_to_db():
+    """Синхронизирует матчи из Google Sheets с базой данных"""
+    if not gs_client or not sheet:
+        logger.warning("Google Sheets not configured; skipping match sync")
+        return
+    
+    try:
+        # Получаем матчи из Google Sheets
+        matches = get_matches_from_sheets()
+        
+        # Синхронизируем с базой данных
+        with engine.begin() as conn:
+            # Проверяем существование колонок
+            existing_columns = [row[0] for row in conn.execute(sql_text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'matches'
+            """))]
+            
+            # Очищаем существующие матчи
+            conn.execute(sql_text("DELETE FROM matches"))
+            
+            # Добавляем новые матчи
+            for match in matches:
+                # Формируем параметры вставки
+                params = {
+                    "round": match["round"],
+                    "team1": match["team1"],
+                    "team2": match["team2"],
+                    "score1": match["score1"],
+                    "score2": match["score2"],
+                    "datetime": match["datetime"],
+                    "status": match["status"]
+                }
+                
+                # Добавляем коэффициенты, если колонки существуют
+                if 'odds_team1' in existing_columns:
+                    params["odds_team1"] = match["odds_team1"]
+                if 'odds_team2' in existing_columns:
+                    params["odds_team2"] = match["odds_team2"]
+                if 'odds_draw' in existing_columns:
+                    params["odds_draw"] = match["odds_draw"]
+                
+                # Формируем SQL-запрос
+                columns = ", ".join(params.keys())
+                placeholders = ", ".join([f":{k}" for k in params.keys()])
+                
+                conn.execute(sql_text(f"""
+                    INSERT INTO matches ({columns})
+                    VALUES ({placeholders})
+                """), params)
+        
+        logger.info(f"Synced {len(matches)} matches to database")
+    except Exception as e:
+        logger.error(f"Error syncing matches to database: {e}", exc_info=True)
+        
 def generate_test_matches():
     """Генерирует тестовые матчи, если Google Sheets недоступен"""
     logger.info("Generating test matches as fallback")
@@ -2245,69 +2332,6 @@ def generate_test_matches():
     MATCHES_CACHE['last_updated'] = datetime.now(timezone.utc)
     
     return matches
-
-def sync_matches_to_db():
-    """Синхронизирует матчи из Google Sheets с базой данных"""
-    if not gs_client or not sheet:
-        logger.warning("Google Sheets not configured; skipping match sync")
-        return
-    
-    try:
-        # Получаем матчи из Google Sheets
-        matches = get_matches_from_sheets()
-        
-        # Синхронизируем с базой данных
-        with engine.begin() as conn:
-            # Проверяем существование колонок
-            existing_columns = [row[0] for row in conn.execute(sql_text("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'matches'
-            """))]
-            
-            # Очищаем существующие матчи
-            conn.execute(sql_text("DELETE FROM matches"))
-            
-            # Добавляем новые матчи
-            for match in matches:
-                # Формируем параметры вставки
-                params = {
-                    "round": match["round"],
-                    "team1": match["team1"],
-                    "team2": match["team2"],
-                    "score1": match["score1"],
-                    "score2": match["score2"],
-                    "datetime": match["datetime"],
-                    "status": match["status"]
-                }
-                
-                # Добавляем коэффициенты, если колонки существуют
-                if 'odds_team1' in existing_columns:
-                    params["odds_team1"] = match["odds_team1"]
-                if 'odds_team2' in existing_columns:
-                    params["odds_team2"] = match["odds_team2"]
-                if 'odds_draw' in existing_columns:
-                    params["odds_draw"] = match["odds_draw"]
-                
-                # Формируем SQL-запрос
-                columns = ", ".join(params.keys())
-                placeholders = ", ".join([f":{k}" for k in params.keys()])
-                
-                conn.execute(sql_text(f"""
-                    INSERT INTO matches ({columns})
-                    VALUES ({placeholders})
-                """), params)
-        
-        logger.info(f"Synced {len(matches)} matches to database")
-    except Exception as e:
-        logger.error(f"Error syncing matches to database: {e}", exc_info=True)
-        
-# --- Test data generator (if no matches) ---
-def generate_test_matches():
-    """Удаляет тестовые матчи, так как мы используем Google Sheets"""
-    pass
-
-generate_test_matches()
 
 # Синхронизируем матчи из Google Sheets с базой данных
 try:
