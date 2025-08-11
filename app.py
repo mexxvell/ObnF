@@ -2101,17 +2101,6 @@ def get_matches_from_sheets():
     
     try:
         ws = sheet.worksheet("РАСПИСАНИЕ ИГР")
-        # Остальной код...
-    except Exception as e:
-        logger.exception("Error getting matches from Google Sheets:")
-        if MATCHES_CACHE['data'] is not None:
-            logger.warning("Using cached data due to Google Sheets error")
-            return MATCHES_CACHE['data']
-        logger.warning("No cached data available, generating test matches")
-        return generate_test_matches()
-    
-    try:
-        ws = sheet.worksheet("РАСПИСАНИЕ ИГР")
         data = ws.get_all_values()
         
         # Пропускаем заголовки (первую строку)
@@ -2167,6 +2156,9 @@ def get_matches_from_sheets():
                         year = parts[0]
                         month = parts[1]
                         day = parts[2]
+                else:
+                    logger.error(f"Unsupported date format: {date_str}")
+                    continue
                 
                 date_time_str = f"{year}-{month}-{day}"
                 
@@ -2183,23 +2175,23 @@ def get_matches_from_sheets():
                 continue
             
             # Определяем статус матча с учетом временной зоны
-current_time = datetime.now(timezone.utc)
-match_end_time = match_datetime + timedelta(hours=2)  # Предполагаем, что матч длится 2 часа
+            current_time = datetime.now(timezone.utc)
+            match_end_time = match_datetime + timedelta(hours=2)  # Предполагаем, что матч длится 2 часа
 
-# Определяем, является ли матч "актуально завершенным" (в течение последних 24 часов)
-is_recently_finished = (current_time > match_end_time) and (current_time < match_end_time + timedelta(days=1))
+            # Определяем, является ли матч "актуально завершенным" (в течение последних 24 часов)
+            is_recently_finished = (current_time > match_end_time) and (current_time < match_end_time + timedelta(days=1))
 
-# Статус матча
-if match_datetime > current_time:
-    status = "scheduled"
-elif is_recently_finished:
-    status = "recently_finished"  # Новый статус для недавно завершенных матчей
-else:
-    status = "finished"
+            # Статус матча
+            if match_datetime > current_time:
+                status = "scheduled"
+            elif is_recently_finished:
+                status = "recently_finished"  # Новый статус для недавно завершенных матчей
+            else:
+                status = "finished"
 
-# Если матч завершен, но счет не 0-0, то статус "finished"
-if status == "finished" and (score1 > 0 or score2 > 0):
-    status = "finished"
+            # Если матч завершен, но счет не 0-0, то статус "finished"
+            if status == "finished" and (score1 > 0 or score2 > 0):
+                status = "finished"
             
             # Добавляем матч
             matches.append({
