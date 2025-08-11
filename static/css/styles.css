@@ -1552,11 +1552,14 @@ table tr:last-child td {
     width: 100%;
     height: calc(100vh - 100px);
     border: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 /* Показываем iframe после инициализации */
 .page-frame.ready {
     display: block;
+    opacity: 1;
 }
 
 /* Стилизация заголовков туров */
@@ -1620,3 +1623,4 @@ table tr:last-child td {
 .team-container {
     text-align: center;
 }
+

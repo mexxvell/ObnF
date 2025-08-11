@@ -53,23 +53,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // Плавно скрываем экран загрузки
+if (loadingScreen) {
+    loadingScreen.style.opacity = '0';
+    setTimeout(() => {
+        console.log('[INIT] Hiding loading screen');
         if (loadingScreen) {
-            loadingScreen.style.opacity = '0';
-            setTimeout(() => {
-                console.log('[INIT] Hiding loading screen');
-                if (loadingScreen) {
-                    loadingScreen.style.display = 'none';
-                }
-                if (appContainer) {
-                    console.log('[INIT] Showing app container');
-                    appContainer.classList.remove('hidden');
-                }
-                if (frame && success) {
-                    console.log('[INIT] Showing frame');
-                    frame.style.display = 'block';
-                }
-            }, 500);
+            loadingScreen.style.display = 'none';
         }
+        if (appContainer) {
+            console.log('[INIT] Showing app container');
+            appContainer.classList.remove('hidden');
+        }
+        if (frame && success) {
+            console.log('[INIT] Showing frame');
+            frame.style.display = 'block';
+        }
+    }, 500);
+}
+
+// В случае успеха также убираем сообщение об ошибке, если оно было показано
+if (success && frame) {
+    // Очищаем содержимое iframe от сообщения об ошибке
+    try {
+        if (frame.contentDocument) {
+            frame.contentDocument.body.innerHTML = '';
+        }
+    } catch (e) {
+        console.warn('[INIT] Could not clear iframe content:', e);
+    }
+}
         
         if (success) {
             // Настраиваем интерфейс
@@ -94,36 +106,36 @@ document.addEventListener('DOMContentLoaded', () => {
             // Загружаем содержимое активной вкладки
             loadActiveTabContent(activeTab);
         } else {
-            // Показываем уведомление об ошибке
-            console.error('[INIT] Initialization failed');
-            showNotification('Не удалось инициализировать приложение. Проверьте соединение и перезагрузите страницу.', 'error');
-            
-            // Все равно показываем приложение, чтобы пользователь мог перезагрузить
-            if (appContainer) {
-                console.log('[INIT] Showing app container despite error');
-                appContainer.classList.remove('hidden');
+    // Показываем уведомление об ошибке
+    console.error('[INIT] Initialization failed');
+    showNotification('Не удалось инициализировать приложение. Проверьте соединение и перезагрузите страницу.', 'error');
+    
+    // Все равно показываем приложение, чтобы пользователь мог перезагрузить
+    if (appContainer) {
+        console.log('[INIT] Showing app container despite error');
+        appContainer.classList.remove('hidden');
+    }
+    
+    // Показываем сообщение об ошибке в основном контенте
+    if (frame) {
+        frame.style.display = 'block';
+        frame.src = '/miniapp/home'; // Вместо about:blank загружаем главную страницу
+        frame.onload = function() {
+            // Добавляем обработчик для кнопки перезагрузки
+            try {
+                const reloadBtn = frame.contentDocument.querySelector('button[onclick="location.reload()"]');
+                if (reloadBtn) {
+                    reloadBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        location.reload();
+                    });
+                }
+            } catch (e) {
+                console.warn('[INIT] Could not add reload button handler:', e);
             }
-            
-            // Показываем сообщение об ошибке в основном контенте
-            if (frame) {
-                frame.style.display = 'block';
-                frame.src = 'about:blank';
-                frame.onload = function() {
-                    const errorContent = `
-                        <div style="padding: 20px; text-align: center; color: #ff6b6b;">
-                            <h2>Ошибка инициализации</h2>
-                            <p>Не удалось загрузить приложение. Пожалуйста, перезагрузите страницу.</p>
-                            <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer;">
-                                Перезагрузить
-                            </button>
-                        </div>
-                    `;
-                    frame.contentDocument.open();
-                    frame.contentDocument.write(errorContent);
-                    frame.contentDocument.close();
-                };
-            }
-        }
+        };
+    }
+}
     };
     
     // Обновление прогресс-бара
@@ -227,20 +239,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             const data = await response.json();
-            console.log('[SESSION] Init response data:', data);
-            
-            if (data.success) {
-                console.log('[SESSION] Session initialized successfully');
-                // Обновляем информацию о пользователе
-                const userMini = document.getElementById('user-mini');
-                if (userMini) {
-                    userMini.textContent = user.first_name || 'Пользователь';
-                }
-                return true;
-            } else {
-                console.error('[SESSION] Session initialization failed:', data.error);
-                throw new Error(data.error || 'Session initialization failed');
-            }
+console.log('[SESSION] Init response data:', data);
+
+if (data.success) {
+    console.log('[SESSION] Session initialized successfully');
+    // Обновляем информацию о пользователе
+    const userMini = document.getElementById('user-mini');
+    if (userMini) {
+        userMini.textContent = user.first_name || 'Пользователь';
+    }
+    
+    // Добавляем класс к iframe для плавного появления
+    if (frame) {
+        frame.classList.add('ready');
+    }
+    
+    return true;
+} else {
+    console.error('[SESSION] Session initialization failed:', data.error);
+    throw new Error(data.error || 'Session initialization failed');
+}
         } catch (error) {
             console.error('[SESSION] Error initializing session:', error);
             throw error;
