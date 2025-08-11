@@ -784,8 +784,6 @@ function loadStreamsTable(frame) {
             streamsContainer.innerHTML = '<p class="error">Ошибка загрузки трансляций</p>';
         });
 }
-    }
-
     
     // Показ уведомлений
     function showNotification(message, type = 'info') {
