@@ -152,13 +152,108 @@ def ensure_sheets_structure():
 # Флаг для отслеживания состояния инициализации
 _initialized = False
 
+def init_database():
+    """Инициализирует структуру базы данных из SQL-скрипта"""
+    try:
+        # Проверяем, существует ли таблица users
+        db = get_db()
+        cursor = db.cursor()
+        
+        # Проверяем наличие таблицы users
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+        
+        if not table_exists:
+            logger.info("Таблицы не найдены, запускаем инициализацию из schema.sql")
+            
+            # Читаем SQL-скрипт
+            with open('sql/schema.sql', 'r', encoding='utf-8') as f:
+                sql_script = f.read()
+            
+            # Выполняем скрипт
+            cursor.execute(sql_script)
+            db.commit()
+            logger.info("✅ Структура базы данных успешно инициализирована")
+        else:
+            logger.info("База данных уже инициализирована")
+            
+            # Проверяем наличие необходимых колонок в таблице users
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'users'
+            """)
+            columns = [row[0] for row in cursor.fetchall()]
+            
+            required_columns = ['credits', 'xp', 'level', 'daily_checkin_streak', 'last_checkin_date']
+            missing_columns = [col for col in required_columns if col not in columns]
+            
+            if missing_columns:
+                logger.warning(f"Отсутствуют колонки в таблице users: {', '.join(missing_columns)}")
+                # Можно добавить код для добавления недостающих колонок
+                for col in missing_columns:
+                    if col == 'credits':
+                        cursor.execute("ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
+                    elif col == 'xp':
+                        cursor.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0")
+                    elif col == 'level':
+                        cursor.execute("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
+                    elif col == 'daily_checkin_streak':
+                        cursor.execute("ALTER TABLE users ADD COLUMN daily_checkin_streak INTEGER NOT NULL DEFAULT 0")
+                    elif col == 'last_checkin_date':
+                        cursor.execute("ALTER TABLE users ADD COLUMN last_checkin_date DATE")
+                db.commit()
+                logger.info(f"✅ Добавлены недостающие колонки: {', '.join(missing_columns)}")
+                
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка при инициализации базы данных: {str(e)}")
+        # Попробуем выполнить минимальную инициализацию
+        try:
+            db = get_db()
+            cursor = db.cursor()
+            
+            # Создаем минимальную таблицу users
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGINT PRIMARY KEY,
+                    credits INTEGER NOT NULL DEFAULT 0,
+                    xp INTEGER NOT NULL DEFAULT 0,
+                    level INTEGER NOT NULL DEFAULT 1,
+                    daily_checkin_streak INTEGER NOT NULL DEFAULT 0,
+                    last_checkin_date DATE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            # Создаем минимальную таблицу matches_cache
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS matches_cache (
+                    match_id TEXT PRIMARY KEY,
+                    data_json JSONB NOT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            db.commit()
+            logger.info("✅ Созданы минимальные таблицы для запуска приложения")
+        except Exception as e2:
+            logger.error(f"❌ Не удалось создать минимальные таблицы: {str(e2)}")
+
 @app.before_request
 def check_initialization():
     """Проверяет и запускает инициализацию при первом запросе"""
     global _initialized
     if not _initialized:
         try:
-            initialize()
+            init_database()  # Сначала инициализируем базу данных
+            initialize()     # Затем инициализируем Google Sheets
             _initialized = True
         except Exception as e:
             logger.error(f"Критическая ошибка при инициализации: {str(e)}")
@@ -196,34 +291,96 @@ def get_profile():
     db = get_db()
     cursor = db.cursor()
     
+    try:
+        # Проверяем структуру таблицы users
+        cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'users'
+        """)
+        columns = [row[0] for row in cursor.fetchall()]
+        
+        # Определяем, какие колонки нужны
+        required_columns = ['id', 'username', 'display_name', 'credits', 'xp', 'level', 
+                           'daily_checkin_streak', 'last_checkin_date', 'created_at', 'updated_at']
+        
+        # Если есть недостающие колонки, добавляем их
+        for col in required_columns:
+            if col not in columns:
+                if col == 'credits':
+                    cursor.execute("ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
+                elif col == 'xp':
+                    cursor.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0")
+                elif col == 'level':
+                    cursor.execute("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
+                elif col == 'daily_checkin_streak':
+                    cursor.execute("ALTER TABLE users ADD COLUMN daily_checkin_streak INTEGER NOT NULL DEFAULT 0")
+                elif col == 'last_checkin_date':
+                    cursor.execute("ALTER TABLE users ADD COLUMN last_checkin_date DATE")
+                # Добавьте другие колонки по аналогии
+        
+        db.commit()
+    except Exception as e:
+        logger.error(f"Ошибка при проверке структуры таблицы users: {str(e)}")
+    
     # Получаем профиль пользователя
-    cursor.execute("""
-        SELECT id, username, display_name, credits, xp, level, 
-               daily_checkin_streak, last_checkin_date
-        FROM users 
-        WHERE id = %s
-    """, (user_id,))
-    user = cursor.fetchone()
+    try:
+        cursor.execute("""
+            SELECT id, username, display_name, credits, xp, level, 
+                   daily_checkin_streak, last_checkin_date
+            FROM users 
+            WHERE id = %s
+        """, (user_id,))
+        user = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Ошибка при запросе к таблице users: {str(e)}")
+        # Пытаемся восстановить таблицу
+        try:
+            cursor.execute("""
+                CREATE TABLE users (
+                    id BIGINT PRIMARY KEY,
+                    credits INTEGER NOT NULL DEFAULT 0,
+                    xp INTEGER NOT NULL DEFAULT 0,
+                    level INTEGER NOT NULL DEFAULT 1,
+                    daily_checkin_streak INTEGER NOT NULL DEFAULT 0,
+                    last_checkin_date DATE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            db.commit()
+            user = None
+        except Exception as e2:
+            logger.error(f"Не удалось восстановить таблицу users: {str(e2)}")
+            return jsonify({"error": "Database error"}), 500
     
     if not user:
         # Регистрация нового пользователя
-        cursor.execute("""
-            INSERT INTO users (id, credits, xp, level, 
-                              daily_checkin_streak, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-            RETURNING id, username, display_name, credits, xp, level, 
-                      daily_checkin_streak, last_checkin_date
-        """, (user_id, FIRST_LOGIN_CREDITS, XP_REGISTRATION, 1, 0))
-        user = cursor.fetchone()
-        db.commit()
+        try:
+            cursor.execute("""
+                INSERT INTO users (id, credits, xp, level, 
+                                  daily_checkin_streak, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                RETURNING id, username, display_name, credits, xp, level, 
+                          daily_checkin_streak, last_checkin_date
+            """, (user_id, FIRST_LOGIN_CREDITS, XP_REGISTRATION, 1, 0))
+            user = cursor.fetchone()
+            db.commit()
+        except Exception as e:
+            logger.error(f"Ошибка при создании пользователя: {str(e)}")
+            return jsonify({"error": "Database error"}), 500
     
     # Получаем открытые ачивки
-    cursor.execute("""
-        SELECT achievement_key, tier, unlocked_at 
-        FROM achievements_unlocked 
-        WHERE user_id = %s
-    """, (user_id,))
-    achievements = cursor.fetchall()
+    try:
+        cursor.execute("""
+            SELECT achievement_key, tier, unlocked_at 
+            FROM achievements_unlocked 
+            WHERE user_id = %s
+        """, (user_id,))
+        achievements = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Ошибка при запросе ачивок: {str(e)}")
+        achievements = []
     
     # Формируем ответ
     profile = {
