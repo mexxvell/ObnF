@@ -1,4 +1,3 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -10,6 +9,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
+    <!-- ДОБАВЛЕНО: Скрытый элемент для OWNER_TELEGRAM_ID -->
+    <!-- Этот элемент должен быть сразу после начала тега <body> -->
+    <div id="owner-telegram-id" data-value="{{ owner_telegram_id }}"></div>
+
     <!-- Splash screen -->
     <div class="page" id="splash">
         <div class="splash-logo">
@@ -296,6 +299,17 @@
 
     <!-- Уведомления -->
     <div class="notification" id="notification"></div>
+
+    <!-- ДОБАВЛЕНО: JavaScript для placeholder изображения -->
+    <!-- Этот код должен быть перед закрывающим </body> -->
+    <script>
+        // Убедимся, что все элементы загружены
+        document.addEventListener('DOMContentLoaded', function() {
+            // Добавляем placeholder изображение для ачивок
+            const placeholderImg = new Image();
+            placeholderImg.src = '/static/img/achievements/placeholder.png';
+        });
+    </script>
 
     <script src="/static/js/app.js"></script>
 </body>

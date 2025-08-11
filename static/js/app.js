@@ -1,3 +1,9 @@
+/**
+ * НЛО — Футбольная Лига
+ * Основной JavaScript для Telegram Web App
+ * Версия: 1.0 (исправленная)
+ */
+
 document.addEventListener('DOMContentLoaded', () => {
     // Инициализация Telegram WebApp
     if (window.Telegram && Telegram.WebApp) {
@@ -12,8 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPage: 'splash',
         userData: null,
         matches: [],
-        achievements: {}  // Добавлено для хранения данных об ачивках
+        achievements: {}  // Данные об ачивках
     };
+
+    // Получаем OWNER_TELEGRAM_ID из скрытого элемента (переданного из бэкенда)
+    const ownerTelegramId = document.getElementById('owner-telegram-id')?.dataset.value || '';
 
     // Загрузка данных пользователя
     const loadUserData = async () => {
@@ -23,7 +32,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Загрузка данных для пользователя: ${app.userId}`);
             
             const response = await fetch(`/api/profile?user_id=${app.userId}`);
-            if (!response.ok) throw new Error(`Ошибка загрузки профиля: ${response.status}`);
+            if (!response.ok) {
+                throw new Error(`Ошибка загрузки профиля: ${response.status}`);
+            }
             
             app.userData = await response.json();
             console.log('Данные профиля загружены:', app.userData);
@@ -40,7 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             console.log('Загрузка матчей...');
             const response = await fetch('/api/matches');
-            if (!response.ok) throw new Error(`Ошибка загрузки матчей: ${response.status}`);
+            if (!response.ok) {
+                throw new Error(`Ошибка загрузки матчей: ${response.status}`);
+            }
             
             const data = await response.json();
             app.matches = data.matches || [];
@@ -53,31 +66,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Загрузка данных об ачивках
+    // Загрузка данных об ачивках (ИСПРАВЛЕНО!)
     const loadAchievements = async () => {
         try {
             console.log('Загрузка данных об ачивках...');
-            const response = await fetch('/static/achievements.json');
-            if (!response.ok) throw new Error('Не удалось загрузить ачивки');
+            
+            // ИСПОЛЬЗУЕМ ОТНОСИТЕЛЬНЫЙ ПУТЬ И УБЕЖДАЕМСЯ, ЧТО ФАЙЛ В ПАПКЕ static
+            const response = await fetch('/achievements.json');
+            
+            if (!response.ok) {
+                throw new Error(`Ошибка загрузки ачивок: ${response.status}`);
+            }
             
             app.achievements = await response.json();
             console.log('Данные об ачивках загружены');
             return true;
         } catch (error) {
             console.error('Ошибка загрузки ачивок:', error);
-            // Создаем минимальные данные об ачивках для работы приложения
+            
+            // Создаем минимальные данные об ачивках
             app.achievements = {
                 "bets_made": {
                     "title": "Новичок прогноза",
                     "description": "Сделайте 10 ставок",
+                    "bronze_threshold": 10,
+                    "silver_threshold": 100,
+                    "gold_threshold": 1000,
                     "image_paths": {
                         "bronze": "bets_bronze.png",
                         "silver": "bets_silver.png",
                         "gold": "bets_gold.png"
                     }
+                },
+                "exact_scores": {
+                    "title": "Точный счёт",
+                    "description": "Угадайте точный счёт матча",
+                    "bronze_threshold": 1,
+                    "silver_threshold": 10,
+                    "gold_threshold": 50,
+                    "image_paths": {
+                        "bronze": "exact_bronze.png",
+                        "silver": "exact_silver.png",
+                        "gold": "exact_gold.png"
+                    }
                 }
-                // Другие ачивки будут добавлены при успешной загрузке
+                // Другие базовые ачивки...
             };
+            
             console.warn('Используются минимальные данные об ачивках');
             return true;
         }
@@ -98,14 +133,21 @@ document.addEventListener('DOMContentLoaded', () => {
             renderProfile();
             renderMatches();
             
+            // Проверяем, является ли пользователь владельцем
+            initAdminPanel();
+            
             // Переходим к основному экрану
             console.log('Переключение на основной экран');
-            showPage('main');
+            setTimeout(() => {
+                showPage('main');
+            }, 500); // Небольшая задержка для анимации загрузки
         } catch (error) {
             console.error('Критическая ошибка инициализации:', error);
             showNotification('Ошибка загрузки данных. Попробуйте позже.', 'error');
             // Даже при ошибках показываем интерфейс
-            showPage('main');
+            setTimeout(() => {
+                showPage('main');
+            }, 500);
         }
     };
 
@@ -131,7 +173,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Рендер профиля с обработкой ошибок
+    // Анимация прогресс-бара
+    const animateProgressBar = () => {
+        const progressBar = document.getElementById('xp-progress');
+        if (!progressBar) return;
+        
+        const width = progressBar.style.width;
+        progressBar.style.width = '0%';
+        
+        setTimeout(() => {
+            progressBar.style.transition = 'width 1s ease-out';
+            progressBar.style.width = width;
+        }, 10);
+    };
+
+    // Рендер профиля
     const renderProfile = () => {
         try {
             console.log('Рендер профиля...');
@@ -191,7 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Рендер ачивок с обработкой ошибок
+    // Рендер ачивок
     const renderAchievements = () => {
         try {
             console.log('Рендер ачивок...');
@@ -229,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     achievementEl.className = `achievement-card ${tierClass}`;
                     achievementEl.innerHTML = `
                         <img src="/static/img/achievements/${achievement.key}_${tierClass}.png" 
-                             alt="${achievementData.title}" onerror="this.src='/static/img/achievements/placeholder.png'">
+                             alt="${achievementData.title}" onerror="this.onerror=null;this.src='/static/img/achievements/placeholder.png'">
                         <div class="achievement-info">
                             <h4>${achievementData.title}</h4>
                             <p>${achievementData.description}</p>
@@ -249,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Рендер матчей с обработкой ошибок
+    // Рендер матчей
     const renderMatches = () => {
         try {
             console.log('Рендер матчей...');
@@ -317,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Текст для статуса матча с обработкой неизвестных статусов
+    // Текст для статуса матча
     const getStatusText = (status) => {
         const statuses = {
             'scheduled': 'Запланирован',
@@ -327,7 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return statuses[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Неизвестно');
     };
 
-    // Показ модального окна ставки с проверкой
+    // Показ модального окна ставки
     const showBetModal = (matchId) => {
         const modal = document.getElementById('bet-modal');
         if (!modal) {
@@ -372,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (modal) modal.style.display = 'none';
     };
 
-    // Размещение ставки с улучшенной обработкой ошибок
+    // Размещение ставки
     const placeBet = async () => {
         const modal = document.getElementById('bet-modal');
         if (!modal) {
@@ -430,7 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Ежедневный чек-ин с улучшенной обработкой
+    // Ежедневный чек-ин
     const dailyCheckin = async () => {
         try {
             console.log('Ежедневный чек-ин...');
@@ -461,7 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Показ уведомления с автоматическим исчезновением
+    // Показ уведомления
     const showNotification = (message, type = 'info') => {
         const notification = document.getElementById('notification');
         if (!notification) return;
@@ -559,19 +615,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (winningsEl) winningsEl.textContent = (amount * odds).toFixed(2);
     };
 
-    // Инициализация админ-панели (если владелец)
+    // Инициализация админ-панели (ИСПРАВЛЕНО!)
     const initAdminPanel = () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const userId = urlParams.get('user_id');
-        
-        if (userId === process.env.OWNER_TELEGRAM_ID) {
-            const adminTab = document.getElementById('admin-tab');
-            if (adminTab) adminTab.style.display = 'block';
+        try {
+            console.log('Инициализация админ-панели...');
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('user_id');
+            
+            // Сравниваем с ownerTelegramId из скрытого элемента
+            if (userId && ownerTelegramId && userId === ownerTelegramId) {
+                console.log('Пользователь является владельцем');
+                const adminTab = document.getElementById('admin-tab');
+                if (adminTab) {
+                    adminTab.style.display = 'block';
+                    console.log('Админ-панель активирована');
+                }
+            } else {
+                console.log('Пользователь НЕ является владельцем');
+            }
+        } catch (error) {
+            console.error('Ошибка инициализации админ-панели:', error);
         }
     };
 
     // Запуск приложения
     initEventListeners();
     initApp();
-    initAdminPanel();
 });

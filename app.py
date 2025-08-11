@@ -673,7 +673,8 @@ def initialize():
 # API для фронтенда
 @app.route('/')
 def index():
-    return render_template('index.html')
+    owner_telegram_id = os.environ.get('OWNER_TELEGRAM_ID', '')
+    return render_template('index.html', owner_telegram_id=owner_telegram_id)
 
 @app.route('/api/profile', methods=['GET'])
 def get_profile():
