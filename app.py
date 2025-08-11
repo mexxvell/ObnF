@@ -283,10 +283,10 @@ if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
         gs_client = gspread.authorize(credentials)
         
         # Пытаемся открыть таблицу
-try:
+    try:
     sheet = gs_client.open_by_key(GS_SHEET_ID)
     logger.info("Successfully connected to Google Sheets with title: %s", sheet.title)
-except gspread.exceptions.APIError as e:
+    except gspread.exceptions.APIError as e:
     error_details = e.response.json()
     if 'error' in error_details and 'message' in error_details['error']:
         error_message = error_details['error']['message']
