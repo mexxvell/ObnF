@@ -266,7 +266,6 @@ if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
             raise ValueError(f"Missing required fields: {missing_fields}")
         
         # Используем современный метод авторизации
-        import google.auth
         from google.oauth2 import service_account
         
         # Обновленные scope для современного API
@@ -281,27 +280,21 @@ if GS_ENABLED and GS_CREDS_JSON and GS_SHEET_ID:
         
         # Авторизуемся через gspread
         gs_client = gspread.authorize(credentials)
-        
-        # Пытаемся открыть таблицу
-    try:
-    sheet = gs_client.open_by_key(GS_SHEET_ID)
-    logger.info("Successfully connected to Google Sheets with title: %s", sheet.title)
-    except gspread.exceptions.APIError as e:
-    error_details = e.response.json()
-    if 'error' in error_details and 'message' in error_details['error']:
-        error_message = error_details['error']['message']
-        if 'has no permission' in error_message or 'Forbidden' in error_message:
-            logger.error("ACCESS ERROR: Service account does not have access to the spreadsheet. "
-                        "Please share the spreadsheet with: %s", 
-                        creds_dict.get('client_email', 'UNKNOWN_EMAIL'))
-    raise
-        
-        # Проверяем подключение
         logger.info("Successfully authorized with Google Sheets API")
         
         # Пытаемся открыть таблицу
-        sheet = gs_client.open_by_key(GS_SHEET_ID)
-        logger.info("Successfully connected to Google Sheets with title: %s", sheet.title)
+        try:
+            sheet = gs_client.open_by_key(GS_SHEET_ID)
+            logger.info("Successfully connected to Google Sheets with title: %s", sheet.title)
+        except gspread.exceptions.APIError as e:
+            error_details = e.response.json()
+            if 'error' in error_details and 'message' in error_details['error']:
+                error_message = error_details['error']['message']
+                if 'has no permission' in error_message or 'Forbidden' in error_message:
+                    logger.error("ACCESS ERROR: Service account does not have access to the spreadsheet. "
+                                "Please share the spreadsheet with: %s", 
+                                creds_dict.get('client_email', 'UNKNOWN_EMAIL'))
+            raise
     except Exception as e:
         logger.exception("Google Sheets connection failed with detailed error:")
         gs_client = None
