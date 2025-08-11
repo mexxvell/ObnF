@@ -77,12 +77,165 @@ def owner_required(f):
 
 # Google Sheets API
 def get_sheets_service():
-    creds_info = json.loads(os.environ['GS_CREDS_JSON'])
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info,
-        scopes=['https://www.googleapis.com/auth/spreadsheets']
-    )
-    return build('sheets', 'v4', credentials=creds)
+    """Создает и проверяет соединение с Google Sheets API"""
+    try:
+        logger.info("🔍 Инициализация Google Sheets API...")
+        
+        # Проверяем наличие необходимых переменных окружения
+        if not os.environ.get('GS_CREDS_JSON'):
+            logger.error("❌ Переменная окружения GS_CREDS_JSON не установлена")
+            return None
+        
+        if not os.environ.get('GS_SHEET_ID'):
+            logger.error("❌ Переменная окружения GS_SHEET_ID не установлена")
+            return None
+        
+        # Парсим JSON-ключи
+        try:
+            creds_info = json.loads(os.environ['GS_CREDS_JSON'])
+            logger.info("✅ JSON-ключи для Google API успешно распаршены")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Ошибка парсинга GS_CREDS_JSON: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Неизвестная ошибка при парсинге GS_CREDS_JSON: {str(e)}")
+            return None
+        
+        # Создаем учетные данные
+        try:
+            creds = service_account.Credentials.from_service_account_info(
+                creds_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
+            )
+            logger.info("✅ Учетные данные для Google API успешно созданы")
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания учетных данных: {str(e)}")
+            return None
+        
+        # Создаем сервис
+        try:
+            service = build('sheets', 'v4', credentials=creds)
+            logger.info("✅ Сервис Google Sheets API успешно создан")
+            
+            # Проверяем доступ к таблице
+            spreadsheet_id = os.environ['GS_SHEET_ID']
+            try:
+                sheet_metadata = service.spreadsheets().get(
+                    spreadsheetId=spreadsheet_id
+                ).execute()
+                
+                logger.info(f"✅ Доступ к Google Таблице подтвержден (ID: {spreadsheet_id})")
+                logger.info(f"   Название таблицы: {sheet_metadata.get('properties', {}).get('title', 'Неизвестно')}")
+                
+                # Логируем существующие листы
+                sheets = [sheet['properties']['title'] for sheet in sheet_metadata.get('sheets', [])]
+                logger.info(f"   Существующие листы: {', '.join(sheets) if sheets else 'отсутствуют'}")
+                
+                return service
+            except Exception as e:
+                logger.error(f"❌ Ошибка доступа к Google Таблице: {str(e)}")
+                logger.error("   Возможные причины:")
+                logger.error("   1. Неправильный GS_SHEET_ID")
+                logger.error("   2. Сервисный аккаунт не имеет прав доступа")
+                logger.error("   3. Таблица не существует или удалена")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания сервиса Google Sheets: {str(e)}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка при инициализации Google Sheets API: {str(e)}")
+        return None
+
+def ensure_sheets_structure():
+    """Создает листы в Google Sheets, если их нет"""
+    logger.info("🔍 Проверка структуры Google Sheets...")
+    
+    service = get_sheets_service()
+    if not service:
+        logger.error("❌ Не удалось подключиться к Google Sheets API")
+        return False
+    
+    spreadsheet_id = os.environ['GS_SHEET_ID']
+    
+    # Список необходимых листов
+    required_sheets = [
+        "Таблица", "Статистика Голы", "Статистика ассистенты", 
+        "Статистика Г+П", "Расписание игр", "Составы", 
+        "Детали Матча", "Ставки", "leaderboard_history", "referrals"
+    ]
+    
+    try:
+        # Получаем текущие листы
+        sheet_metadata = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id
+        ).execute()
+        existing_sheets = [sheet['properties']['title'] for sheet in sheet_metadata.get('sheets', [])]
+        
+        logger.info(f"   Найдено существующих листов: {len(existing_sheets)}")
+        
+        # Создаем отсутствующие листы
+        created_sheets = []
+        for sheet_name in required_sheets:
+            if sheet_name not in existing_sheets:
+                logger.info(f"   🆕 Создаем лист: {sheet_name}")
+                body = {
+                    'requests': [{
+                        'addSheet': {
+                            'properties': {'title': sheet_name}
+                        }
+                    }]
+                }
+                service.spreadsheets().batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body=body
+                ).execute()
+                created_sheets.append(sheet_name)
+                
+                # Добавляем заголовки
+                headers = []
+                if sheet_name == "Таблица":
+                    headers = [["key", "value"]]
+                elif sheet_name == "Статистика Голы":
+                    headers = [["player_id", "player_name", "team", "matches_played", "goals", "season"]]
+                elif sheet_name == "Статистика ассистенты":
+                    headers = [["player_id", "player_name", "team", "matches_played", "assists", "season"]]
+                elif sheet_name == "Статистика Г+П":
+                    headers = [["player_id", "player_name", "team", "matches_played", "goals_plus_assists", "season"]]
+                elif sheet_name == "Расписание игр":
+                    headers = [["match_id", "date_iso", "time_iso", "home_team", "away_team", "status", "score_home", "score_away", "venue", "season", "notes"]]
+                elif sheet_name == "Составы":
+                    headers = [["match_id", "team", "player_id", "player_name", "position", "is_starting"]]
+                elif sheet_name == "Детали Матча":
+                    headers = [["match_id", "event_time", "event_type", "player_id", "player_name", "team", "details"]]
+                elif sheet_name == "Ставки":
+                    headers = [["user_id", "total_bets", "wins", "losses", "win_percent"]]
+                elif sheet_name == "leaderboard_history":
+                    headers = [["week_start_iso", "user_id", "username", "wins", "total_bets", "win_percent", "rank", "reward_given"]]
+                elif sheet_name == "referrals":
+                    headers = [["referrer_id", "referred_id", "timestamp", "reward_granted"]]
+                    
+                if headers:
+                    service.spreadsheets().values().update(
+                        spreadsheetId=spreadsheet_id,
+                        range=f"{sheet_name}!A1",
+                        valueInputOption="RAW",
+                        body={'values': headers}
+                    ).execute()
+        
+        if created_sheets:
+            logger.info(f"✅ Успешно создано {len(created_sheets)} новых листов: {', '.join(created_sheets)}")
+        else:
+            logger.info("✅ Все необходимые листы уже существуют")
+            
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка при работе с Google Sheets: {str(e)}")
+        logger.error("   Подробности ошибки:")
+        logger.error(f"   - Spreadsheet ID: {spreadsheet_id}")
+        logger.error(f"   - Тип ошибки: {type(e).__name__}")
+        logger.error(f"   - Сообщение: {str(e)}")
+        return False
 
 def ensure_sheets_structure():
     """Создает листы в Google Sheets, если их нет"""
@@ -157,8 +310,13 @@ def init_database():
     logger.info("🔍 Начинаем проверку структуры базы данных...")
     
     try:
+        # Сначала очищаем возможные ошибки транзакции
         db = get_db()
         cursor = db.cursor()
+        cursor.execute("ROLLBACK")  # Сбрасываем текущую транзакцию, если она в состоянии ошибки
+        db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при сбросе транзакции: {str(e)}")
         
         # Проверяем существование всех необходимых таблиц
         required_tables = [
@@ -287,89 +445,120 @@ def create_minimal_tables(cursor, db):
     logger.info("✅ Минимальные таблицы успешно созданы")
 
 def check_users_table_structure(cursor, db):
-    """Проверяет и исправляет структуру таблицы users"""
+    """Проверяет и исправляет структуру таблицы users с правильной обработкой типов данных"""
     logger.info("🔍 Проверяем структуру таблицы users...")
     
     # Получаем текущие колонки
     cursor.execute("""
-        SELECT column_name 
+        SELECT column_name, data_type, is_nullable 
         FROM information_schema.columns 
         WHERE table_name = 'users'
     """)
-    columns = [row[0] for row in cursor.fetchall()]
+    columns_info = {row[0]: {'type': row[1], 'nullable': row[2]} for row in cursor.fetchall()}
     
     # Определяем необходимые колонки
     required_columns = {
-        'id': 'BIGINT PRIMARY KEY',
-        'username': 'TEXT',
-        'display_name': 'TEXT',
-        'credits': 'INTEGER NOT NULL DEFAULT 0',
-        'xp': 'INTEGER NOT NULL DEFAULT 0',
-        'level': 'INTEGER NOT NULL DEFAULT 1',
-        'daily_checkin_streak': 'INTEGER NOT NULL DEFAULT 0',
-        'last_checkin_date': 'DATE',
-        'created_at': 'TIMESTAMP NOT NULL DEFAULT NOW()',
-        'updated_at': 'TIMESTAMP NOT NULL DEFAULT NOW()',
-        'banned_until': 'TIMESTAMP',
-        'referrer_id': 'BIGINT'
+        'id': {'type': 'bigint', 'nullable': 'NO', 'default': None},
+        'username': {'type': 'text', 'nullable': 'YES', 'default': None},
+        'display_name': {'type': 'text', 'nullable': 'YES', 'default': None},
+        'credits': {'type': 'integer', 'nullable': 'NO', 'default': '0'},
+        'xp': {'type': 'integer', 'nullable': 'NO', 'default': '0'},
+        'level': {'type': 'integer', 'nullable': 'NO', 'default': '1'},
+        'daily_checkin_streak': {'type': 'integer', 'nullable': 'NO', 'default': '0'},
+        'last_checkin_date': {'type': 'date', 'nullable': 'YES', 'default': None},
+        'created_at': {'type': 'timestamp without time zone', 'nullable': 'NO', 'default': 'NOW()'},
+        'updated_at': {'type': 'timestamp without time zone', 'nullable': 'NO', 'default': 'NOW()'},
+        'banned_until': {'type': 'timestamp without time zone', 'nullable': 'YES', 'default': None},
+        'referrer_id': {'type': 'bigint', 'nullable': 'YES', 'default': None}
     }
     
     # Проверяем и добавляем недостающие колонки
-    for col_name, col_def in required_columns.items():
-        if col_name not in columns:
+    for col_name, col_spec in required_columns.items():
+        if col_name not in columns_info:
             logger.warning(f"⚠️ Отсутствует колонка {col_name} в таблице users")
             
-            # Определяем тип колонки для ALTER TABLE
-            if 'NOT NULL' in col_def:
-                default_val = '0' if 'INTEGER' in col_def else 'NOW()' if 'TIMESTAMP' in col_def else "''"
-                cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def.split('NOT NULL')[0]}")
+            # Создаем колонку
+            null_constraint = "NOT NULL" if col_spec['nullable'] == 'NO' else ""
+            default_clause = f"DEFAULT {col_spec['default']}" if col_spec['default'] else ""
+            
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_spec['type']} {null_constraint} {default_clause}")
+            
+            # Если колонка NOT NULL и не имеет DEFAULT, устанавливаем значение по умолчанию
+            if col_spec['nullable'] == 'NO' and not col_spec['default']:
+                default_val = '0' if 'int' in col_spec['type'] else 'NOW()' if 'timestamp' in col_spec['type'] else "''"
                 cursor.execute(f"UPDATE users SET {col_name} = {default_val} WHERE {col_name} IS NULL")
-                cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} SET NOT NULL")
-            else:
-                cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
             
             db.commit()
             logger.info(f"✅ Добавлена колонка {col_name} в таблицу users")
+            columns_info[col_name] = {'type': col_spec['type'], 'nullable': col_spec['nullable']}
     
     # Проверяем типы существующих колонок
-    for col_name, col_def in required_columns.items():
-        if col_name in columns:
-            cursor.execute(f"""
-                SELECT data_type, is_nullable 
-                FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name = '{col_name}'
-            """)
-            col_info = cursor.fetchone()
+    for col_name, col_spec in required_columns.items():
+        if col_name in columns_info:
+            current_info = columns_info[col_name]
             
-            if col_info:
-                data_type, is_nullable = col_info
-                needs_fix = False
+            # Проверяем тип данных
+            current_type = current_info['type']
+            required_type = col_spec['type']
+            
+            # Специальная обработка для timestamp
+            if 'timestamp' in required_type and 'timestamp' in current_type:
+                continue  # Типы совместимы
+            
+            # Проверяем NOT NULL
+            if col_spec['nullable'] == 'NO' and current_info['nullable'] == 'YES':
+                logger.warning(f"⚠️ Колонка {col_name} должна быть NOT NULL")
+                try:
+                    # Устанавливаем значения по умолчанию для существующих NULL
+                    if col_spec['default']:
+                        cursor.execute(f"UPDATE users SET {col_name} = {col_spec['default']} WHERE {col_name} IS NULL")
+                    else:
+                        default_val = '0' if 'int' in required_type else 'NOW()' if 'timestamp' in required_type else "''"
+                        cursor.execute(f"UPDATE users SET {col_name} = {default_val} WHERE {col_name} IS NULL")
+                    
+                    # Делаем колонку NOT NULL
+                    cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} SET NOT NULL")
+                    db.commit()
+                    logger.info(f"✅ Колонка {col_name} теперь NOT NULL")
+                except Exception as e:
+                    logger.error(f"❌ Не удалось сделать колонку {col_name} NOT NULL: {str(e)}")
+            
+            # Проверяем тип данных
+            type_mapping = {
+                'integer': 'int',
+                'bigint': 'int',
+                'text': 'str',
+                'date': 'date',
+                'timestamp': 'datetime'
+            }
+            
+            current_simple = next((k for k in type_mapping if k in current_type), current_type)
+            required_simple = next((k for k in type_mapping if k in required_type), required_type)
+            
+            if current_simple != required_simple:
+                logger.warning(f"⚠️ Некорректный тип колонки {col_name}: ожидается {required_type}, текущий {current_type}")
                 
-                # Проверяем NOT NULL
-                if 'NOT NULL' in col_def and is_nullable == 'YES':
-                    needs_fix = True
-                
-                # Проверяем тип данных (упрощенная проверка)
-                if 'INTEGER' in col_def and data_type != 'integer':
-                    needs_fix = True
-                elif 'TIMESTAMP' in col_def and 'timestamp' not in data_type:
-                    needs_fix = True
-                elif 'TEXT' in col_def and data_type != 'text':
-                    needs_fix = True
-                
-                if needs_fix:
-                    logger.warning(f"⚠️ Некорректный тип колонки {col_name} в таблице users")
-                    # В реальном приложении здесь была бы логика исправления типа колонки
-                    # Для простоты мы просто пересоздадим колонку
-                    try:
-                        cursor.execute(f"ALTER TABLE users RENAME COLUMN {col_name} TO {col_name}_old")
-                        cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
-                        cursor.execute(f"UPDATE users SET {col_name} = {col_name}_old::text::integer WHERE {col_name}_old IS NOT NULL")
-                        cursor.execute(f"ALTER TABLE users DROP COLUMN {col_name}_old")
+                try:
+                    # Специальная обработка для timestamp
+                    if 'timestamp' in required_type and 'timestamp' not in current_type:
+                        cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} TYPE TIMESTAMP USING {col_name}::timestamp")
                         db.commit()
-                        logger.info(f"✅ Исправлена колонка {col_name} в таблице users")
-                    except Exception as e:
-                        logger.error(f"❌ Не удалось исправить колонку {col_name}: {str(e)}")
+                        logger.info(f"✅ Тип колонки {col_name} исправлен на TIMESTAMP")
+                        continue
+                    
+                    # Специальная обработка для integer
+                    if 'int' in required_type and 'int' not in current_type:
+                        cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} TYPE INTEGER USING {col_name}::integer")
+                        db.commit()
+                        logger.info(f"✅ Тип колонки {col_name} исправлен на INTEGER")
+                        continue
+                    
+                    # Для других типов
+                    cursor.execute(f"ALTER TABLE users ALTER COLUMN {col_name} TYPE {required_type}")
+                    db.commit()
+                    logger.info(f"✅ Тип колонки {col_name} исправлен на {required_type}")
+                except Exception as e:
+                    logger.error(f"❌ Не удалось исправить тип колонки {col_name}: {str(e)}")
 
 def check_matches_cache_table(cursor, db):
     """Проверяет и исправляет структуру таблицы matches_cache"""
@@ -444,20 +633,42 @@ def check_initialization():
 
 def initialize():
     """Функция инициализации структуры Google Sheets"""
+    logger.info("🚀 Начало инициализации Google Sheets...")
+    
+    # Проверяем доступ к Google Sheets API
+    service = get_sheets_service()
+    if not service:
+        logger.error("❌ Критическая ошибка: не удалось подключиться к Google Sheets API")
+        logger.warning("   Приложение будет работать без интеграции с Google Sheets")
+        return False
+    
+    # Проверяем структуру
     try:
-        ensure_sheets_structure()
-        logger.info("✅ Структура Google Sheets проверена и инициализирована")
+        logger.info("🔍 Проверка структуры Google Sheets...")
+        if ensure_sheets_structure():
+            logger.info("✅ Структура Google Sheets проверена и инициализирована")
+            return True
+        else:
+            logger.warning("⚠️ Не удалось полностью инициализировать структуру Google Sheets")
+            return False
     except Exception as e:
-        logger.error(f"❌ Ошибка при инициализации Google Sheets: {str(e)}")
-        # Можно добавить повторную попытку через некоторое время
-        import time
-        time.sleep(2)
-        try:
-            ensure_sheets_structure()
-            logger.info("✅ Структура Google Sheets проверена и инициализирована (повторная попытка)")
-        except Exception as e2:
-            logger.error(f"❌ Ошибка при повторной инициализации: {str(e2)}")
-            # Не критично прерывать работу всего приложения из-за проблем с Google Sheets
+        logger.error(f"❌ Критическая ошибка при инициализации Google Sheets: {str(e)}")
+        
+        # Показываем более подробную информацию об ошибке
+        logger.error("   Детали ошибки:")
+        logger.error(f"   - Тип ошибки: {type(e).__name__}")
+        logger.error(f"   - Сообщение: {str(e)}")
+        
+        # Проверяем, есть ли у сервисного аккаунта доступ
+        spreadsheet_id = os.environ.get('GS_SHEET_ID', 'не указан')
+        logger.error(f"   - Spreadsheet ID: {spreadsheet_id}")
+        logger.error("   - Возможные причины:")
+        logger.error("     1. Неправильный Spreadsheet ID")
+        logger.error("     2. Сервисный аккаунт не добавлен как редактор таблицы")
+        logger.error("     3. Таблица не существует или удалена")
+        logger.error("     4. Недостаточно прав у сервисного аккаунта")
+        
+        return False
 
 # API для фронтенда
 @app.route('/')
@@ -597,8 +808,11 @@ def get_matches():
         logger.error(f"❌ Ошибка при запросе кеша матчей: {str(e)}")
         cache = None
     
+    # ИСПРАВЛЕНИЕ: Работаем с timezone-aware датами
+    now = datetime.now(timezone.utc)
+    
     # Если кеш старый или отсутствует - обновляем
-    if not cache or (datetime.now(timezone.utc) - cache[1]).total_seconds() > 900:  # 15 минут
+    if not cache or (now - cache[1].replace(tzinfo=timezone.utc)).total_seconds() > 900:  # 15 минут
         logger.info("🔄 Кеш матчей устарел или отсутствует, обновляем...")
         update_matches_cache()
         
