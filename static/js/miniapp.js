@@ -2,6 +2,9 @@
 
 console.log('[INIT] miniapp.js script loaded');
 
+// Объявляем pollInterval в глобальной области видимости
+let pollInterval = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[INIT] DOMContentLoaded event triggered in miniapp.js');
     
@@ -164,6 +167,7 @@ async function initializeApp() {
             // Запускаем опрос уведомлений
             console.log('[INIT] Starting notifications polling');
             pollNotifications();
+            // pollInterval теперь глобальная переменная
             pollInterval = setInterval(pollNotifications, 8000);
             
             // Устанавливаем активную вкладку
@@ -886,8 +890,6 @@ async function initializeApp() {
     }
     
     // Опрос уведомлений
-    let pollInterval = null;
-    
     async function pollNotifications() {
         try {
             console.log('[NOTIF] Polling notifications');
