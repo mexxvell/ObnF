@@ -149,11 +149,38 @@ def ensure_sheets_structure():
                     body={'values': headers}
                 ).execute()
 
-# Инициализация при старте
-@app.before_first_request
+# Флаг для отслеживания состояния инициализации
+_initialized = False
+
+@app.before_request
+def check_initialization():
+    """Проверяет и запускает инициализацию при первом запросе"""
+    global _initialized
+    if not _initialized:
+        try:
+            initialize()
+            _initialized = True
+        except Exception as e:
+            logger.error(f"Критическая ошибка при инициализации: {str(e)}")
+            # Важно: не устанавливаем _initialized = True при ошибке,
+            # чтобы попытаться инициализироваться при следующем запросе
+
 def initialize():
-    ensure_sheets_structure()
-    logger.info("Структура Google Sheets проверена и инициализирована")
+    """Функция инициализации структуры Google Sheets"""
+    try:
+        ensure_sheets_structure()
+        logger.info("✅ Структура Google Sheets проверена и инициализирована")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при инициализации Google Sheets: {str(e)}")
+        # Можно добавить повторную попытку через некоторое время
+        import time
+        time.sleep(2)
+        try:
+            ensure_sheets_structure()
+            logger.info("✅ Структура Google Sheets проверена и инициализирована (повторная попытка)")
+        except Exception as e2:
+            logger.error(f"❌ Ошибка при повторной инициализации: {str(e2)}")
+            # Не критично прерывать работу всего приложения из-за проблем с Google Sheets
 
 # API для фронтенда
 @app.route('/')
